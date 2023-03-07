@@ -64,7 +64,7 @@ fuzz_run_target(afl_state_t *afl, afl_forkserver_t *fsrv, u32 timeout) {
   clock_gettime(CLOCK_REALTIME, &spec);
   time_spent_start = (spec.tv_sec * 1000000000) + spec.tv_nsec;
 #endif
-
+  DisableFuzz(afl->mgr);
   return res;
 
 }
@@ -1031,6 +1031,7 @@ u8 __attribute__((hot))
 common_fuzz_stuff(afl_state_t *afl, u8 *out_buf, u32 len) {
 
   u8 fault;
+  ERManager mgr = afl->mgr;
 
   if (unlikely(len = write_to_testcase(afl, (void **)&out_buf, len, 0)) == 0) {
 
@@ -1038,6 +1039,7 @@ common_fuzz_stuff(afl_state_t *afl, u8 *out_buf, u32 len) {
 
   }
 
+  SetEnablePoint(mgr, afl->queue_cur->enables->values, afl->queue_cur->enables->size);
   fault = fuzz_run_target(afl, &afl->fsrv, afl->fsrv.exec_tmout);
 
   if (afl->stop_soon) { return 1; }
@@ -1078,6 +1080,31 @@ common_fuzz_stuff(afl_state_t *afl, u8 *out_buf, u32 len) {
     show_stats(afl);
 
   }
+
+  // collect error point here and do the fault injection fuzzing
+  btree_t eap_copy = CopyErrorArea(mgr);
+  size_t enables_count = afl->queue_cur->enables->size;
+  uint64_t *enables = malloc((enables_count + 1) * sizeof(uint64_t));
+  memcpy(enables, afl->queue_cur->enables->values, enables_count * sizeof(uint64_t));
+  u8 saved = 0;
+  for (uint32_t i = 0; i < eap_copy->size; ++i) {
+    if (unlikely(len = write_to_testcase(afl, (void **)&out_buf, len, 0)) == 0) continue;
+    enables[enables_count] = eap_copy->values[i];
+    SetEnablePoint(mgr, enables, enables_count + 1);
+    if (!CheckEnablePoint(mgr)) continue;
+    afl->err_seqs++;
+    fault = fuzz_run_target(afl, &afl->fsrv, afl->fsrv.exec_tmout);
+    if (afl->stop_soon) goto out;
+    if (fault == FSRV_RUN_TMOUT) continue;
+    saved = save_if_interesting(afl, out_buf, len, fault);
+    if (saved) {
+      afl->queued_discovered += 1;
+      afl->useful_err_seqs += 1;
+    }
+  }
+out:
+  free(enables);
+  btree_destroy(eap_copy);
 
   return 0;
 

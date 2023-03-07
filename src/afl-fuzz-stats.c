@@ -360,6 +360,15 @@ void write_stats_file(afl_state_t *afl, u32 t_bytes, double bitmap_cvg,
     fprintf(f, "\n");
 
   }
+  fprintf(f,
+          "error_points      : %zu\n"
+          "error_points_ctx  : %zu\n"
+          "error_seqs        : %d\n"
+          "useful_error_seqs : %d\n"
+          "percentage        : %0.02f%%\n",
+          afl->mgr->points->size, afl->mgr->ctx_points->size,
+          afl->err_seqs, afl->useful_err_seqs,
+          afl->useful_err_seqs / (100.0 * afl->err_seqs));
 
   fclose(f);
 
@@ -1213,7 +1222,7 @@ void show_stats_normal(afl_state_t *afl) {
   //
   //} else {
 
-  SAYF(bV bSTOP "    trim/eff : " cRST "%-36s " bSTG bV RESET_G1, tmp);
+  SAYF(bV bSTOP "    trim/eff : " cRST "%-36s " bSTG bV "\n", tmp);
 
   //}
 
@@ -1268,6 +1277,13 @@ void show_stats_normal(afl_state_t *afl) {
     SAYF("\r");
 
   }
+
+  sprintf(tmp, "%zu, %zu", afl->mgr->points->size, afl->mgr->ctx_points->size);
+  SAYF(bV bSTOP " points, ctx : " cRST "%-36s " bSTG bV "\n", tmp);
+
+  sprintf(tmp, "%u, %u (%0.02f%%)", afl->useful_err_seqs, afl->err_seqs,
+          (100.0 * afl->useful_err_seqs) / afl->err_seqs);
+  SAYF(bV bSTOP "(useful)seqs : " cRST "%-36s " bSTG bV bSTOP RESET_G1, tmp);
 
   /* Last line */
   SAYF(SET_G1 "\n" bSTG bLB bH30 bH20 bH2 bRB bSTOP cRST RESET_G1);

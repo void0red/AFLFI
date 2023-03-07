@@ -227,7 +227,10 @@ llvmGetPassPluginInfo() {
                 [](ModulePassManager &MPM, OptimizationLevel OL) {
 
                   MPM.addPass(ModuleSanitizerCoverageAFL());
-
+                  std::string ErrorPointFile("none");
+                  auto file = std::getenv("ERROR_POINT");
+                  if (file) ErrorPointFile = std::string(file);
+                  MPM.addPass(FaultInjectionPass(ErrorPointFile));
                 });
 
           }};

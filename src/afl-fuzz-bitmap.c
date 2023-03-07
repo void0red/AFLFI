@@ -459,7 +459,7 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
   u8  fn[PATH_MAX];
   u8 *queue_fn = "";
-  u8  new_bits = 0, keeping = 0, res, classified = 0, is_timeout = 0;
+  u8  new_bits = 0, keeping = 0, res, classified = 0, is_timeout = 0, new_point = 0;
   s32 fd;
   u64 cksum = 0;
 
@@ -476,6 +476,7 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
       afl->n_fuzz[cksum % N_FUZZ_SIZE]++;
 
   }
+  new_point = ExistNewPoint(afl->mgr);
 
   if (likely(fault == afl->crash_mode)) {
 
@@ -484,7 +485,7 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
     new_bits = has_new_bits_unclassified(afl, afl->virgin_bits);
 
-    if (likely(!new_bits)) {
+    if (likely(!new_bits && !new_point)) {
 
       if (unlikely(afl->crash_mode)) { ++afl->total_crashes; }
       return 0;
@@ -501,7 +502,10 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
         alloc_printf("%s/queue/id:%06u,%s", afl->out_dir, afl->queued_items,
                      describe_op(afl, new_bits + is_timeout,
                                  NAME_MAX - strlen("id:000000,")));
-
+    u8* epf =
+        alloc_printf("%s/queue/.error/id:%06u,%s", afl->out_dir, afl->queued_items,
+                     describe_op(afl, new_bits + is_timeout,
+                                 NAME_MAX - strlen("id:000000,")));
 #else
 
     queue_fn =
@@ -513,6 +517,9 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
     ck_write(fd, mem, len, queue_fn);
     close(fd);
     add_to_queue(afl, queue_fn, len, 0);
+    SaveEnableToTree(afl->mgr, afl->queue_top->enables);
+    SaveEnableToFile(afl->mgr->area->epoint, afl->mgr->area->esize, epf);
+    ck_free(epf);
 
 #ifdef INTROSPECTION
     if (afl->custom_mutators_count && afl->current_custom_fuzz) {
@@ -743,6 +750,13 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
       snprintf(fn, PATH_MAX, "%s/crashes/id:%06llu,sig:%02u,%s", afl->out_dir,
                afl->saved_crashes, afl->fsrv.last_kill_signal,
                describe_op(afl, 0, NAME_MAX - strlen("id:000000,sig:00,")));
+
+      u8* epf = alloc_printf("%s/crashes/.error/id:%06llu,sig:%02u,%s", afl->out_dir,
+                             afl->saved_crashes, afl->fsrv.last_kill_signal,
+                             describe_op(afl, 0, NAME_MAX - strlen("id:000000,sig:00,")));
+
+      SaveEnableToFile(afl->mgr->area->epoint, afl->mgr->area->esize, epf);
+      ck_free(epf);
 
 #else
 

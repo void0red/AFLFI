@@ -132,7 +132,10 @@ llvmGetPassPluginInfo() {
                 [](ModulePassManager &MPM, OptimizationLevel OL) {
 
                   MPM.addPass(AFLCoverage());
-
+                  std::string ErrorPointFile("none");
+                  auto file = std::getenv("ERROR_POINT");
+                  if (file) ErrorPointFile = std::string(file);
+                  MPM.addPass(FaultInjectionPass(ErrorPointFile));
                 });
 
   /* TODO LTO registration */
@@ -1102,4 +1105,3 @@ static RegisterStandardPasses RegisterAFLPass(
 static RegisterStandardPasses RegisterAFLPass0(
     PassManagerBuilder::EP_EnabledOnOptLevel0, registerAFLPass);
 #endif
-

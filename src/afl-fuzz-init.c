@@ -726,6 +726,7 @@ void read_testcases(afl_state_t *afl, u8 *directory) {
       snprintf(dfn, PATH_MAX, "%s/.state/deterministic_done/%s", afl->in_dir,
                nl[i]->d_name);
       u8 *fn2 = alloc_printf("%s/%s", dir, nl[i]->d_name);
+      u8 *epf = alloc_printf("%s/.error/%s", dir, nl[i]->d_name);
 
       u8 passed_det = 0;
 
@@ -774,6 +775,9 @@ void read_testcases(afl_state_t *afl, u8 *directory) {
 
       add_to_queue(afl, fn2, st.st_size >= MAX_FILE ? MAX_FILE : st.st_size,
                    passed_det);
+      // find if exist error points file
+      LoadEnableFromFile(afl->queue_top->enables, epf);
+      ck_free(epf);
 
       if (unlikely(afl->shm.cmplog_mode)) {
 
@@ -1726,6 +1730,10 @@ static void handle_existing_out_dir(afl_state_t *afl) {
   if (delete_files(fn, CASE_PREFIX)) { goto dir_cleanup_failed; }
   ck_free(fn);
 
+  fn = alloc_printf("%s/queue/.error", afl->out_dir);
+  if (delete_files(fn, CASE_PREFIX)) { goto dir_cleanup_failed; }
+  ck_free(fn);
+
   /* Then, get rid of the .state subdirectory itself (should be empty by now)
      and everything matching <afl->out_dir>/queue/id:*. */
 
@@ -1746,6 +1754,9 @@ static void handle_existing_out_dir(afl_state_t *afl) {
     unlink(fn);                                            /* Ignore errors */
     ck_free(fn);
 
+    fn = alloc_printf("%s/crashes/.error/", afl->out_dir);
+    if (delete_files(fn, CASE_PREFIX)) { goto dir_cleanup_failed; }
+    ck_free(fn);
   }
 
   fn = alloc_printf("%s/crashes", afl->out_dir);
@@ -1991,6 +2002,10 @@ void setup_dirs_fds(afl_state_t *afl) {
   if (mkdir(tmp, 0700)) { PFATAL("Unable to create '%s'", tmp); }
   ck_free(tmp);
 
+  tmp = alloc_printf("%s/queue/.error/", afl->out_dir);
+  if (mkdir(tmp, 0700)) { PFATAL("Unable to create '%s'", tmp); }
+  ck_free(tmp);
+
   /* Top-level directory for queue metadata used for session
      resume and related tasks. */
 
@@ -2042,6 +2057,10 @@ void setup_dirs_fds(afl_state_t *afl) {
   /* All recorded crashes. */
 
   tmp = alloc_printf("%s/crashes", afl->out_dir);
+  if (mkdir(tmp, 0700)) { PFATAL("Unable to create '%s'", tmp); }
+  ck_free(tmp);
+
+  tmp = alloc_printf("%s/crashes/.error/", afl->out_dir);
   if (mkdir(tmp, 0700)) { PFATAL("Unable to create '%s'", tmp); }
   ck_free(tmp);
 

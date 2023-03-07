@@ -36,7 +36,7 @@
 #ifndef _FILE_OFFSET_BITS
   #define _FILE_OFFSET_BITS 64
 #endif
-
+#include "fault_injection.h"
 #include "config.h"
 #include "types.h"
 #include "debug.h"
@@ -203,6 +203,7 @@ struct queue_entry {
 
   struct queue_entry *mother;           /* queue entry this based on        */
 
+  btree_t enables;
 };
 
 struct extra_data {
@@ -424,6 +425,9 @@ struct foreign_sync {
 };
 
 typedef struct afl_state {
+  ERManager mgr;
+  u32 err_seqs;
+  u32 useful_err_seqs;
 
   /* Position of this state in the global states list */
   u32 _id;

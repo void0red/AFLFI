@@ -529,6 +529,7 @@ void add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passed_det) {
   q->trace_mini = NULL;
   q->testcase_buf = NULL;
   q->mother = afl->queue_cur;
+  q->enables = btree_create();
 
 #ifdef INTROSPECTION
   q->bitsmap_size = afl->bitsmap_size;
@@ -591,8 +592,8 @@ void destroy_queue(afl_state_t *afl) {
     q = afl->queue_buf[i];
     ck_free(q->fname);
     ck_free(q->trace_mini);
+    btree_destroy(q->enables);
     ck_free(q);
-
   }
 
 }

@@ -997,6 +997,8 @@ static void __afl_start_snapshots(void) {
 
 #endif
 
+
+static void __fault_injection_init();
 /* Fork server logic. */
 
 static void __afl_start_forkserver(void) {
@@ -1116,6 +1118,8 @@ static void __afl_start_forkserver(void) {
     }
 
   }
+
+  __fault_injection_init();
 
   while (1) {
 
@@ -2412,3 +2416,116 @@ void __afl_set_persistent_mode(u8 mode) {
 
 #undef write_error
 
+#include "fault_injection.h"
+
+FIArea        fiArea = NULL;
+Stack         emuStack = NULL;
+
+uint32_t      bitmap[MAX_ERRORS >> 5];
+
+static inline bool ts_test_and_set_bit(uint64_t hs) {
+  uint32_t idx = (hs & MAX_ERRORS_BITMASK) >> 5;
+  uint32_t mask = 1 << (hs & 0x1f);
+  bool ret = bitmap[idx] & (1 << (hs & 0x1f));
+  if (!ret) bitmap[idx] |= mask;
+  return ret;
+}
+
+static inline void emu_stack_push(Stack stack, uint64_t value) {
+  if (unlikely(stack->top == MAX_STACK_SIZE)) fprintf(stderr, "emu stack full");
+  stack->data[stack->top++] = value;
+}
+
+static inline bool emu_stack_pop_until(Stack stack, uint64_t expect) {
+  if (unlikely(stack->top == 0)) return false;
+
+  while (--stack->top >= 0) {
+    if (stack->data[stack->top] == expect) return true;
+  }
+  stack->top = 0;
+  return false;
+}
+
+static inline uint64_t to_expect(uint8_t prefix, uint64_t value) {
+  return ((uint64_t)prefix << TRACE_PREFIX_SHIFT) |
+         (value & ((1UL << TRACE_PREFIX_SHIFT) - 1));
+}
+static inline uint64_t emu_hash(Stack stack, uint64_t id) {
+  return XXH64(stack->data, stack->top * sizeof(uint64_t), id);
+}
+
+static inline void *mk_shm(const char *name, int size) {
+  int fd = shm_open(name, O_RDWR, 0666);
+  if (fd < 0) fprintf(stderr, "shm_open failed\n");
+
+  void *ret = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+  close(fd);
+  if (ret == MAP_FAILED) fprintf(stderr, "mmap failed\n");
+  return ret;
+}
+
+static void __fault_injection_init() {
+  char *id = getenv(FAULT_INJECTION_ID_STR);
+  if (!id || id[0] == '\0') {
+    if (__afl_debug) {
+      fprintf(stderr, "can't find FAULT_INJECTION_ID_STR env");
+    }
+    return;
+  }
+  void *area = mk_shm(id, sizeof(struct fault_injection_area));
+  fiArea = area;
+  emuStack = &fiArea->stack;
+
+  if (__afl_debug) {
+    fprintf(stderr,
+            "area: %p, stack area: %p\n", fiArea, emuStack);
+  }
+}
+
+void __fault_injection_trace(uint64_t id) {
+  if (!fiArea || !fiArea->enable) return;
+//   if (__afl_debug) fprintf(stderr, "trace 0x%lx\n", id);
+  uint8_t prefix = id >> TRACE_PREFIX_SHIFT;
+  bool    ok;
+  switch (prefix) {
+    case FuncEntry:
+    case CallEntry: {
+      emu_stack_push(emuStack, id);
+      break;
+    }
+    case FuncExit: {
+      ok = emu_stack_pop_until(emuStack, to_expect(FuncEntry, id));
+      if (unlikely(!ok)) fprintf(stderr, "want 0x%lx failed\n", to_expect(FuncEntry, id));
+      break;
+    }
+    case CallExit: {
+      ok = emu_stack_pop_until(emuStack, to_expect(CallEntry, id));
+      if (unlikely(!ok)) fprintf(stderr, "want 0x%lx failed\n", to_expect(CallEntry, id));
+      break;
+    }
+    case ErrorCollect: {
+      uint32_t idx = fiArea->tsize;
+      if (unlikely(idx >= MAX_ERRORS)) break;
+      // we must do quick dedup here.
+      uint64_t hs = emu_hash(emuStack, id);
+      if (ts_test_and_set_bit(hs)) break;
+      fiArea->tpoint[idx].id = id;
+      fiArea->tpoint[idx].hash = hs;
+      fiArea->tsize = idx + 1;
+      break;
+    }
+    default:
+      fprintf(stderr, "trace data corruption\n");
+  }
+}
+
+bool __fault_injection_control(uint64_t id) {
+  if (!fiArea || !fiArea->enable) return false;
+//  if (__afl_debug) fprintf(stderr, "fj control 0x%lx\n", id);
+
+  uint64_t expect = emu_hash(emuStack, id);
+  for (uint32_t i = 0; i < fiArea->esize; ++i) {
+    if (unlikely(expect == fiArea->epoint[i])) return true;
+  }
+  return false;
+}

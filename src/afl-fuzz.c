@@ -1453,6 +1453,10 @@ int main(int argc, char **argv_orig, char **envp) {
 
     fix_up_sync(afl);
 
+    if (afl->sync_id)
+      afl->mgr = NewERManager(afl->sync_id);
+    else
+      afl->mgr = NewERManager("default");
   }
 
   if (!strcmp(afl->in_dir, afl->out_dir)) {
