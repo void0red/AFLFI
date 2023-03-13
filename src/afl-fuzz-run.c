@@ -64,7 +64,6 @@ fuzz_run_target(afl_state_t *afl, afl_forkserver_t *fsrv, u32 timeout) {
   clock_gettime(CLOCK_REALTIME, &spec);
   time_spent_start = (spec.tv_sec * 1000000000) + spec.tv_nsec;
 #endif
-  DisableFuzz(afl->mgr);
   return res;
 
 }
@@ -1082,17 +1081,15 @@ common_fuzz_stuff(afl_state_t *afl, u8 *out_buf, u32 len) {
   }
 
   // collect error point here and do the fault injection fuzzing
-  btree_t eap_copy = CopyErrorArea(mgr);
-  size_t enables_count = afl->queue_cur->enables->size;
-  uint64_t *enables = malloc((enables_count + 1) * sizeof(uint64_t));
-  memcpy(enables, afl->queue_cur->enables->values, enables_count * sizeof(uint64_t));
-  u8 saved = 0;
-  for (uint32_t i = 0; i < eap_copy->size; ++i) {
-    if (unlikely(len = write_to_testcase(afl, (void **)&out_buf, len, 0)) == 0) continue;
-    enables[enables_count] = eap_copy->values[i];
-    SetEnablePoint(mgr, enables, enables_count + 1);
-    if (!CheckEnablePoint(mgr)) continue;
+  SnapshotTraceAndEnable(mgr);
+  u8 saved;
+  uint32_t enable_add_one = mgr->enables_aux_count + 1;
+  for (uint32_t i = 0; i < mgr->trace_aux_count; ++i) {
+    mgr->enables_aux[mgr->enables_aux_count] = mgr->trace_aux[i];
+    if (!CheckIfDupEnables(mgr, mgr->enables_aux, enable_add_one)) continue;
+    SetEnablePoint(mgr, mgr->enables_aux, enable_add_one);
     afl->err_seqs++;
+    if (unlikely(len = write_to_testcase(afl, (void **)&out_buf, len, 0)) == 0) continue;
     fault = fuzz_run_target(afl, &afl->fsrv, afl->fsrv.exec_tmout);
     if (afl->stop_soon) goto out;
     if (fault == FSRV_RUN_TMOUT) continue;
@@ -1101,10 +1098,10 @@ common_fuzz_stuff(afl_state_t *afl, u8 *out_buf, u32 len) {
       afl->queued_discovered += 1;
       afl->useful_err_seqs += 1;
     }
+    if (!(i % afl->stats_update_freq)) show_stats(afl);
   }
+
 out:
-  free(enables);
-  btree_destroy(eap_copy);
 
   return 0;
 

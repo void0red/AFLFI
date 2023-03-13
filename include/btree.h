@@ -8,25 +8,24 @@
 #include <stdbool.h>
 #include "debug.h"
 #include <stdio.h>
+#include "rbtree.h"
 
 typedef struct _btree_node {
-  uint64_t            value;
-  struct _btree_node *left, *right;
+  uint32_t       value;
+  struct rb_node node;
 } btree_node_t, *btree_node_p;
 
 typedef struct {
-  size_t       size;
-  btree_node_p root;
+  size_t         size;
+  struct rb_root root;
 
-  uint64_t *values;
+  uint32_t *values;
   size_t    capacity;
 } *btree_t;
 
 btree_t btree_create();
 void    btree_destroy(btree_t tree);
-// search for target
-bool btree_search(btree_t tree, uint64_t target);
 // insert value, return true if success, return false if exist.
-bool btree_insert(btree_t tree, uint64_t value);
+bool btree_insert(btree_t tree, uint32_t value);
 
 #endif  // AFLPLUSPLUS_BTREE_H

@@ -801,6 +801,8 @@ void InstPlugin::CollectInsertPoint(llvm::Module *m, bool strict) {
 void InstPlugin::InsertTrace(llvm::Module *m) {
   IRBuilder<> IRB(m->getContext());
   auto       &sourceName = m->getSourceFileName();
+  std::string        tmp;
+  raw_string_ostream ostream(tmp);
 
   for (const auto &pair : entryExit) {
     auto funcName = pair.first->getFunction()->getName();
@@ -809,12 +811,20 @@ void InstPlugin::InsertTrace(llvm::Module *m) {
     auto call = IRB.CreateCall(FaultInjectionTraceFunc, IRB.getInt64(v));
     setNoSanitize(call);
 
+    tmp.clear();
+    pair.first->getDebugLoc().print(ostream);
+    logFile << v << ',' << tmp << '\n';
+
     for (const auto et : pair.second) {
       IRB.SetInsertPoint(et);
       auto v2 =
           getInsertID(sourceName, funcName, InsertType::FuncExit, counter);
       auto call2 = IRB.CreateCall(FaultInjectionTraceFunc, IRB.getInt64(v2));
       setNoSanitize(call2);
+
+      tmp.clear();
+      et->getDebugLoc().print(ostream);
+      logFile << v2 << ',' << tmp << '\n';
     }
     counter++;
   }
@@ -826,10 +836,18 @@ void InstPlugin::InsertTrace(llvm::Module *m) {
     auto call = IRB.CreateCall(FaultInjectionTraceFunc, IRB.getInt64(v));
     setNoSanitize(call);
 
+    tmp.clear();
+    cs->getDebugLoc().print(ostream);
+    logFile << v << ',' << tmp << '\n';
+
     IRB.SetInsertPoint(cs->getNextNode());
     auto v2 = getInsertID(sourceName, funcName, InsertType::CallExit, counter);
     auto call2 = IRB.CreateCall(FaultInjectionTraceFunc, IRB.getInt64(v2));
     setNoSanitize(call2);
+    tmp.clear();
+    cs->getNextNode()->getDebugLoc().print(ostream);
+    logFile << v2 << ',' << tmp << '\n';
+
     counter++;
   }
 }
@@ -856,10 +874,7 @@ void InstPlugin::InsertControl(llvm::Module *m) {
     std::string        tmp;
     raw_string_ostream ostream(tmp);
     es->getDebugLoc().print(ostream);
-    logFile << v << ','
-            << funcName.str() << ','
-            << es->getCalledFunction()->getName().str() << ','
-            << tmp << '\n';
+    logFile << v << ',' << tmp << '\n';
 
     auto check = IRB.CreateCall(FaultInjectionControlFunc, IRB.getInt64(v));
     setNoSanitize(check);
@@ -895,16 +910,16 @@ bool InstPlugin::loadErrorPoint(llvm::StringRef file){
   std::string buf;
   while (std::getline(ifstream, buf)){
     StringRef bufp(buf);
-    auto i = bufp.trim().split(',');
+    auto i = bufp.split(',');
     if (i.second.empty()) continue ;
-    auto ii = i.second.trim().split(',');
+    auto ii = i.second.split(',');
     if (ii.second.empty()) continue ;
     unsigned long long lineno = 0;
-    if (!getAsUnsignedInteger(ii.second, 10, lineno)) continue ;
-    target[i.first.str()] = {ii.first.str(), lineno};
+    if (getAsUnsignedInteger(ii.second.trim(), 10, lineno)) continue ;
+    target[i.first.trim().str()] = {ii.first.trim().str(), lineno};
   }
-  if (target.empty()) return false;
   dbgs() << "Load error point file " << file << " Size " << target.size() << '\n';
+  if (target.empty()) return false;
 
   for (auto &func: M){
     auto callerName = func.getName().str();
@@ -917,8 +932,9 @@ bool InstPlugin::loadErrorPoint(llvm::StringRef file){
       auto iter = target.find(calleeName);
       if (iter == target.end()) continue ;
       auto line = callInst->getDebugLoc().getLine();
-      if (std::get<0>(iter->second) == callerName &&
-          std::get<1>(iter->second) == line){
+      if (std::get<0>(iter->second) == "*" ||
+          (std::get<0>(iter->second) == callerName &&
+           std::get<1>(iter->second) == line)){
         errorSite.insert(callInst);
       }
     }
