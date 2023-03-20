@@ -204,6 +204,7 @@ struct queue_entry {
   struct queue_entry *mother;           /* queue entry this based on        */
 
   btree_t enables;
+  u8 fj_depth;
 };
 
 struct extra_data {

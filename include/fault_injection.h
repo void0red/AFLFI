@@ -9,6 +9,7 @@
 #define MAX_TRACE (1 << 14)
 #define MAX_TRACE_BITS (MAX_TRACE << 6)
 #define FAULT_INJECTION_ID_STR "__FAULT_INJECTION_ID"
+#define MAX_FJ_DEPTH 3
 
 typedef struct fault_injection_area {
   uint64_t trace[MAX_TRACE];
@@ -20,6 +21,7 @@ struct error_manager {
   btree_t  one_enable;
   uint64_t points[MAX_TRACE];
   uint32_t points_count;
+  u8       cur_depth;
 
   // current_enables don't hold the memory
   uint32_t *current_enables;
@@ -43,7 +45,7 @@ void      SnapshotTraceAndEnable(ERManager mgr);
 // return true if success, return false if dup
 bool CheckIfDupEnables(ERManager mgr, uint32_t *enables, size_t count);
 void SetEnablePoint(ERManager mgr, uint32_t *enables, size_t count);
-bool ExistNewPoint(ERManager mgr);
+bool CheckIfExistNewPoint(ERManager mgr);
 void SaveEnableToTree(ERManager mgr, btree_t tree);
 void LoadEnableFromFile(btree_t tree, const u8 *fname);
 void SaveEnableToFile(const uint32_t *data, size_t count, const u8 *fname);

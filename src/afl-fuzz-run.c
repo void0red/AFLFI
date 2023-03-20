@@ -1081,6 +1081,7 @@ common_fuzz_stuff(afl_state_t *afl, u8 *out_buf, u32 len) {
   }
 
   // collect error point here and do the fault injection fuzzing
+  if (mgr->cur_depth >= MAX_FJ_DEPTH) return 0;
   SnapshotTraceAndEnable(mgr);
   u8 saved;
   uint32_t enable_add_one = mgr->enables_aux_count + 1;

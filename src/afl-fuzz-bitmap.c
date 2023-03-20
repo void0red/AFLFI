@@ -476,7 +476,7 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
       afl->n_fuzz[cksum % N_FUZZ_SIZE]++;
 
   }
-  new_point = ExistNewPoint(afl->mgr);
+  new_point = CheckIfExistNewPoint(afl->mgr);
 
   if (likely(fault == afl->crash_mode)) {
 

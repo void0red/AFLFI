@@ -464,6 +464,7 @@ u8 fuzz_one_original(afl_state_t *afl) {
   afl->subseq_tmouts = 0;
 
   afl->cur_depth = afl->queue_cur->depth;
+  afl->mgr->cur_depth = afl->queue_cur->fj_depth;
 
   /*******************************************
    * CALIBRATION (only if failed earlier on) *

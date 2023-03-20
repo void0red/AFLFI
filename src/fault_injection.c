@@ -83,6 +83,7 @@ static size_t do_merge_sort(uint32_t *data, size_t begin, size_t end) {
 }
 
 bool CheckIfDupEnables(ERManager mgr, uint32_t *enables, size_t count) {
+#ifdef FJ_ENABLE_DEDUP
   static uint32_t sorted_enables[DEFAULT_TRACE_AUX_SIZE];
   if (count == 0) return false;
   if (count == 1) return btree_insert(mgr->one_enable, enables[0]);
@@ -92,6 +93,9 @@ bool CheckIfDupEnables(ERManager mgr, uint32_t *enables, size_t count) {
   if (new_count == 1) return btree_insert(mgr->one_enable, sorted_enables[0]);
   return btree_insert(mgr->seqs_hash, hash32((u8 *)sorted_enables,
                                              sizeof(uint32_t) * new_count, 0));
+#else
+  return true;
+#endif
 }
 
 void SetEnablePoint(ERManager mgr, uint32_t *enables, size_t count) {
@@ -142,7 +146,8 @@ static inline uint32_t count_bits(uint64_t i) {
   return (((i + (i >> 4)) & 0xF0F0F0F0F0F0F0F) * 0x101010101010101) >> 56;
 }
 
-bool ExistNewPoint(ERManager mgr) {
+bool CheckIfExistNewPoint(ERManager mgr) {
+  if (mgr->cur_depth >= MAX_FJ_DEPTH) return false;
   bool      exist_new = false;
   uint64_t *trace = mgr->area->trace;
   uint64_t  res;
