@@ -74,9 +74,11 @@ class InstPlugin {
  private:
   const char *FaultInjectionTraceName = "__fault_injection_trace";
   const char *FaultInjectionControlName = "__fault_injection_control";
+  const char *FaultInjectionDistanceName = "__fault_injection_distance";
 
   llvm::FunctionCallee FaultInjectionTraceFunc;
   llvm::FunctionCallee FaultInjectionControlFunc;
+  llvm::FunctionCallee FaultInjectionDistanceFunc;
 
   unsigned      noSanitizeKindId{0};
   llvm::MDNode *noSanitizeNode{nullptr};
@@ -103,6 +105,10 @@ class InstPlugin {
 
   bool loadErrorPoint(llvm::StringRef file);
 
+  std::unordered_map<std::string, unsigned> distance;
+
+  bool loadDistance(llvm::StringRef file);
+
   std::ofstream logFile;
 
   llvm::Module&M;
@@ -112,6 +118,7 @@ class InstPlugin {
   llvm::FunctionAnalysisManager&FAM;
 
   std::string ep_file;
+  std::string dis_file;
 
  public:
   using InstSet = std::unordered_set<llvm::CallInst *>;
@@ -122,8 +129,7 @@ class InstPlugin {
   EntryExit entryExit;
 
   InstPlugin(llvm::Module &M, llvm::ModuleAnalysisManager &MAM,
-             llvm::FunctionAnalysisManager &FAM, llvm::StringRef EPF)
-      : M(M), MAM(MAM), FAM(FAM), ep_file(EPF) {};
+             llvm::FunctionAnalysisManager &FAM);
 
   void runOnModule();
 
@@ -137,9 +143,7 @@ class InstPlugin {
 };
 
 class FaultInjectionPass : public llvm::PassInfoMixin<FaultInjectionPass> {
-  std::string EPF;
  public:
-  explicit FaultInjectionPass(llvm::StringRef EPF): EPF(EPF) {};
   llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM);
 };
 

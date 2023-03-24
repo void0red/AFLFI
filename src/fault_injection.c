@@ -99,14 +99,14 @@ bool CheckIfDupEnables(ERManager mgr, uint32_t *enables, size_t count) {
 }
 
 void SetEnablePoint(ERManager mgr, uint32_t *enables, size_t count) {
-  memset(mgr->area->enables, 0, sizeof(mgr->area->enables));
+  memset(mgr->area, 0, sizeof(*mgr->area));
   // !! must use 64bit here
   uint64_t idx;
   for (size_t i = 0; i < count; ++i) {
     idx = enables[i];
     mgr->area->enables[idx >> 6] |= 1 << (idx & 63);
   }
-  memset(mgr->area->trace, 0, sizeof(mgr->area->trace));
+  mgr->area->status |= 1;
   mgr->current_enables = enables;
   mgr->current_enables_count = count;
 }
@@ -147,6 +147,7 @@ static inline uint32_t count_bits(uint64_t i) {
 }
 
 bool CheckIfExistNewPoint(ERManager mgr) {
+  mgr->area->status = 0;
   if (mgr->cur_depth >= MAX_FJ_DEPTH) return false;
   bool      exist_new = false;
   uint64_t *trace = mgr->area->trace;
@@ -213,4 +214,12 @@ void SaveEnableToFile(const uint32_t *data, size_t count, const u8 *fname) {
     FATAL("write %s failed\n", fname);
   }
   close(fd);
+}
+
+inline double CalcDistance(ERManager mgr) {
+  double ret = mgr->area->distance * 1.0 / (mgr->area->distance_count + 1);
+  if (ret > mgr->max_distance) mgr->max_distance = ret;
+  if (mgr->min_distance == 0 || ret < mgr->min_distance)
+    mgr->min_distance = ret;
+  return ret;
 }

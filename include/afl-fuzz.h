@@ -205,6 +205,7 @@ struct queue_entry {
 
   btree_t enables;
   u8 fj_depth;
+  double distance;
 };
 
 struct extra_data {

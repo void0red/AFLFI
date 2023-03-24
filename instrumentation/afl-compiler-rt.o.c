@@ -2435,8 +2435,8 @@ typedef struct emu_stack {
   int      top;
   uint64_t data[MAX_STACK_SIZE];
 } *Stack;
-static struct emu_stack stack;
-Stack emuStack = &stack;
+static struct emu_stack stack_;
+Stack emuStack = &stack_;
 
 static inline void emu_stack_push(Stack stack, uint64_t value) {
   if (unlikely(stack->top == MAX_STACK_SIZE)){
@@ -2493,7 +2493,7 @@ static void __fault_injection_init() {
 }
 
 void __fault_injection_trace(uint64_t id) {
-  if (!fiArea) return;
+  if (!fiArea || (fiArea->status & 1) == 0) return;
   if (__afl_debug) fprintf(stderr, "fj trace 0x%lx\n", id);
   uint8_t prefix = id >> TRACE_PREFIX_SHIFT;
   bool    ok;
@@ -2524,8 +2524,15 @@ void __fault_injection_trace(uint64_t id) {
 }
 
 bool __fault_injection_control(uint64_t id) {
-  if (!fiArea) return false;
-  if (__afl_debug) fprintf(stderr, "fj control 0x%lx\n", id);
+  if (!fiArea || (fiArea->status & 1) == 0) return false;
   uint32_t hs = emu_hash(emuStack, id);
-  return (fiArea->enables[hs >> 6] & ( 1 << (hs & 63))) >> (hs & 63);
+  bool ret = (fiArea->enables[hs >> 6] & ( 1 << (hs & 63))) >> (hs & 63);
+  if (__afl_debug && ret) fprintf(stderr, "fj control 0x%lx\n", id);
+  return ret;
+}
+
+void __fault_injection_distance(uint32_t dis) {
+  if (!fiArea || (fiArea->status & 1) == 0) return;
+  fiArea->distance_count += 1;
+  fiArea->distance += dis;
 }

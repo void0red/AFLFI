@@ -530,7 +530,9 @@ void add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passed_det) {
   q->testcase_buf = NULL;
   q->mother = afl->queue_cur;
   q->enables = btree_create();
+  SaveEnableToTree(afl->mgr, q->enables);
   q->fj_depth = afl->mgr->cur_depth + 1;
+  q->distance = CalcDistance(afl->mgr);
 
 #ifdef INTROSPECTION
   q->bitsmap_size = afl->bitsmap_size;
@@ -1066,6 +1068,16 @@ u32 calculate_score(afl_state_t *afl, struct queue_entry *q) {
     // Add a lower bound to AFLFast's energy assignment strategies
     perf_score = 1;
 
+  }
+
+  if (q->distance > 0) {
+    double normalized_d = 0;
+    if (afl->mgr->max_distance != afl->mgr->min_distance)
+      normalized_d = (q->distance - afl->mgr->min_distance) / (afl->mgr->max_distance - afl->mgr->min_distance);
+    if (normalized_d >= 0) {
+      double p = (1.0 - normalized_d) * (1.0 - (factor/MAX_FACTOR)) + 0.5 * (factor/MAX_FACTOR);
+      perf_score *= pow(2.0, 2.0 * (double) log2(MAX_FACTOR) * (p - 0.5));
+    }
   }
 
   /* Make sure that we don't go over limit. */

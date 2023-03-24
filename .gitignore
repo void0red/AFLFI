@@ -103,3 +103,4 @@ utils/persistent_mode/test-instr
 !coresight_mode/coresight-trace
 vuln_prog
 .idea/
+/static_analyzer/cmake-build*

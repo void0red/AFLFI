@@ -10,11 +10,14 @@
 #define MAX_TRACE_BITS (MAX_TRACE << 6)
 #define FAULT_INJECTION_ID_STR "__FAULT_INJECTION_ID"
 #define MAX_FJ_DEPTH 3
-
+#define FJ_ENABLE_DEDUP
 typedef struct fault_injection_area {
+  uint64_t status;
+  uint32_t distance_count;
+  uint32_t distance;
   uint64_t trace[MAX_TRACE];
   uint64_t enables[MAX_TRACE];
-} *FIArea;
+} __attribute__((packed)) * FIArea;
 
 struct error_manager {
   btree_t  seqs_hash;
@@ -22,6 +25,8 @@ struct error_manager {
   uint64_t points[MAX_TRACE];
   uint32_t points_count;
   u8       cur_depth;
+  double   min_distance;
+  double   max_distance;
 
   // current_enables don't hold the memory
   uint32_t *current_enables;
@@ -49,4 +54,6 @@ bool CheckIfExistNewPoint(ERManager mgr);
 void SaveEnableToTree(ERManager mgr, btree_t tree);
 void LoadEnableFromFile(btree_t tree, const u8 *fname);
 void SaveEnableToFile(const uint32_t *data, size_t count, const u8 *fname);
+
+double CalcDistance(ERManager mgr);
 #endif  // __FAULT_INJECTION_H

@@ -643,6 +643,23 @@ uint16_t crc16(const char *buf,unsigned int len) {
   return crc;
 }
 
+InstPlugin::InstPlugin(Module &M, ModuleAnalysisManager &MAM,
+                       FunctionAnalysisManager &FAM):
+      M(M), MAM(MAM), FAM(FAM) {
+  auto ep = getenv("ERROR_POINT");
+  if (ep) {
+    ep_file = std::string(ep);
+  } else {
+    ep_file = "";
+  }
+  auto df = getenv("DISTANCE");
+  if (df) {
+    dis_file = std::string(df);
+  } else {
+    dis_file = "";
+  }
+}
+
 bool InstPlugin::validCmpInst(llvm::CmpInst *cmpInst) {
   auto op0 = cmpInst->getOperand(0);
   auto op1 = cmpInst->getOperand(1);
@@ -745,10 +762,13 @@ void InstPlugin::runOnModule() {
       FaultInjectionTraceName, IRB.getVoidTy(), IRB.getInt64Ty());
   FaultInjectionControlFunc = M.getOrInsertFunction(
       FaultInjectionControlName, IRB.getInt1Ty(), IRB.getInt64Ty());
+  FaultInjectionDistanceFunc = M.getOrInsertFunction(
+      FaultInjectionDistanceName, IRB.getVoidTy(), IRB.getInt32Ty());
   noSanitizeKindId = M.getMDKindID("nosanitize");
   noSanitizeNode = MDNode::get(M.getContext(), None);
 
   preDefined = loadErrorPoint(ep_file);
+  loadDistance(dis_file);
 
   CollectInsertPoint(&M);
   logFile << M.getSourceFileName() << " Total " << errorSite.size()
@@ -814,6 +834,12 @@ void InstPlugin::InsertTrace(llvm::Module *m) {
     tmp.clear();
     pair.first->getDebugLoc().print(ostream);
     logFile << v << ',' << tmp << '\n';
+
+    // insert distance
+    auto iter = distance.find(funcName.str());
+    if (iter != distance.end()) {
+      setNoSanitize(IRB.CreateCall(FaultInjectionDistanceFunc, IRB.getInt32(iter->second)));
+    }
 
     for (const auto et : pair.second) {
       IRB.SetInsertPoint(et);
@@ -906,7 +932,8 @@ bool InstPlugin::loadErrorPoint(llvm::StringRef file){
   std::ifstream ifstream(file.data());
   if(!ifstream.is_open()) return false;
 
-  std::unordered_map<std::string, std::tuple<std::string, unsigned int>> target;
+  // target[callee][caller][lineno]
+  std::unordered_map<std::string, std::unordered_map<std::string, std::unordered_set<unsigned>>> target;
   std::string buf;
   while (std::getline(ifstream, buf)){
     StringRef bufp(buf);
@@ -915,8 +942,9 @@ bool InstPlugin::loadErrorPoint(llvm::StringRef file){
     auto ii = i.second.split(',');
     if (ii.second.empty()) continue ;
     unsigned long long lineno = 0;
-    if (getAsUnsignedInteger(ii.second.trim(), 10, lineno)) continue ;
-    target[i.first.trim().str()] = {ii.first.trim().str(), lineno};
+    getAsUnsignedInteger(ii.second.trim(), 10, lineno);
+    target[i.first.trim().str()][ii.first.trim().str()].insert(lineno);
+//    target[i.first.trim().str()] = {ii.first.trim().str(), lineno};
   }
   dbgs() << "Load error point file " << file << " Size " << target.size() << '\n';
   if (target.empty()) return false;
@@ -932,10 +960,15 @@ bool InstPlugin::loadErrorPoint(llvm::StringRef file){
       auto iter = target.find(calleeName);
       if (iter == target.end()) continue ;
       auto line = callInst->getDebugLoc().getLine();
-      if (std::get<0>(iter->second) == "*" ||
-          (std::get<0>(iter->second) == callerName &&
-           std::get<1>(iter->second) == line)){
+      if (iter->second.begin()->first == "*" ) {
         errorSite.insert(callInst);
+        continue ;
+      }
+      auto iter2 = iter->second.find(callerName);
+      if (iter2 != iter->second.end()) {
+        if (iter2->second.find(line) != iter2->second.end()) {
+          errorSite.insert(callInst);
+        }
       }
     }
   }
@@ -943,11 +976,27 @@ bool InstPlugin::loadErrorPoint(llvm::StringRef file){
   return true;
 }
 
+bool InstPlugin::loadDistance(llvm::StringRef file) {
+  std::ifstream ifstream(file.data());
+  if(!ifstream.is_open()) return false;
+  std::string buf;
+  while (std::getline(ifstream, buf)){
+    StringRef bufp(buf);
+    auto i = bufp.split(',');
+    if (i.second.empty()) continue ;
+    unsigned long long dis = 0;
+    if (getAsUnsignedInteger(i.second.trim(), 10, dis)) continue ;
+    distance[i.first.trim().str()] = dis;
+  }
+  dbgs() << "Load distance file " << file << " Size " << distance.size() << '\n';
+  return true;
+}
+
 PreservedAnalyses FaultInjectionPass::run(Module &M,
                                           ModuleAnalysisManager &MAM) {
   auto &FAM = MAM.getResult<FunctionAnalysisManagerModuleProxy>(M).getManager();
   // FAM.registerPass([] { return MemorySSAAnalysis(); });
-  InstPlugin plugin(M, MAM, FAM, EPF);
+  InstPlugin plugin(M, MAM, FAM);
   plugin.runOnModule();
   return PreservedAnalyses::none();
 }

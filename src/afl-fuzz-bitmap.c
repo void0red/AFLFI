@@ -517,7 +517,6 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
     ck_write(fd, mem, len, queue_fn);
     close(fd);
     add_to_queue(afl, queue_fn, len, 0);
-    SaveEnableToTree(afl->mgr, afl->queue_top->enables);
     SaveEnableToFile(afl->mgr->current_enables, afl->mgr->current_enables_count, epf);
     ck_free(epf);
 
