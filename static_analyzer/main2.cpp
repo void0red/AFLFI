@@ -158,37 +158,16 @@ struct Path {
     }
 };
 
-
-void collectOnFunction(Function *F, FunctionAnalysisManager &FAM) {
-    for (auto &inst: instructions(F)) {
-        if (auto *callInst = dyn_cast<CallInst>(&inst)) {
-            auto *callee = dyn_cast<Function>(callInst->getCalledOperand()->stripPointerCasts());
-            if (!callee || callee->isIntrinsic() || !callee->hasName())
-                continue;
-            if (!callee->getReturnType()->isIntOrPtrTy() || callee->getReturnType()->isIntegerTy(1))
-                continue;
-            auto fn = callee->getName();
-            if (std::any_of(blackPrefix.begin(), blackPrefix.end(),
-                            [&](llvm::StringRef prefix) { return fn.startswith_insensitive(prefix); }) ||
-                std::any_of(blackList.begin(), blackList.end(),
-                            [&](llvm::StringRef s) { return fn == s || fn.startswith_insensitive(s); }))
-                continue;
-            if (is_alloc_nofail(callInst))
-                continue;
-
-            auto &mssa = FAM.getResult<MemorySSAAnalysis>(*F).getMSSA();
-            auto DFG = std::make_unique<DFG::DataFlowGraph>(callInst, mssa);
-            DFG->build();
-
-            {
-                std::lock_guard<std::mutex> guard(globalLock);
-                if (DFG->errorHandling.empty()) {
-                    errorHandling[fn.str()].push_back(new Path(callInst));
-                } else {
-                    auto path = new Path(callInst, DFG->errorHandling);
-                    errorHandling[fn.str()].push_back(path);
-                }
-            }
+void collectOnCallee(std::string fn, CallInst* callInst, MemorySSA& mssa) {
+    auto DFG = std::make_unique<DFG::DataFlowGraph>(callInst, mssa);
+    DFG->build();
+    {
+        std::lock_guard<std::mutex> guard(globalLock);
+        if (DFG->errorHandling.empty()) {
+            errorHandling[fn].push_back(new Path(callInst));
+        } else {
+            auto path = new Path(callInst, DFG->errorHandling);
+            errorHandling[fn].push_back(path);
         }
     }
 }
@@ -271,7 +250,25 @@ int main(int argc, char *argv[]) {
                             [&](llvm::StringRef s) { return fn == s || fn.startswith_insensitive(s); }))
                 continue;
         }
-        pool.enqueue(collectOnFunction, &F, std::ref(FAM));
+        for (auto &inst: instructions(F)) {
+            if (auto *callInst = dyn_cast<CallInst>(&inst)) {
+                auto *callee = dyn_cast<Function>(callInst->getCalledOperand()->stripPointerCasts());
+                if (!callee || callee->isIntrinsic() || !callee->hasName())
+                    continue;
+                if (!callee->getReturnType()->isIntOrPtrTy() || callee->getReturnType()->isIntegerTy(1))
+                    continue;
+                auto fn = callee->getName();
+                if (std::any_of(blackPrefix.begin(), blackPrefix.end(),
+                                [&](llvm::StringRef prefix) { return fn.startswith_insensitive(prefix); }) ||
+                    std::any_of(blackList.begin(), blackList.end(),
+                                [&](llvm::StringRef s) { return fn == s || fn.startswith_insensitive(s); }))
+                    continue;
+                if (is_alloc_nofail(callInst))
+                    continue;
+                auto &mssa = FAM.getResult<MemorySSAAnalysis>(F).getMSSA();
+                pool.enqueue(collectOnCallee, fn.str(), callInst, std::ref(mssa));
+            }
+        }
     }
     pool.join();
 
