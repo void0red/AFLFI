@@ -81,13 +81,18 @@ class Crash:
             self.error = error
         self.cmd = [str(root.joinpath(cmd[0]))]
         self.bin = self.cmd[0]
-        self.use_stdin = True
+        self.use_stdin = False
+        add_file = False
         for i in cmd[1:]:
+            # it seems aflpp_driver uses `-` as stdin
             if i == '@@':
+                add_file = True
                 self.cmd.append(str(self.file))
-                self.use_stdin = False
             else:
                 self.cmd.append(i)
+        # append filename at the end
+        if not add_file and not self.use_stdin:
+            self.cmd.append(str(self.file))
 
         self.trace = []
         self.control = []
@@ -146,6 +151,8 @@ class Crash:
                 cid = int(line.split()[-1], 16)
                 if cid not in self.control:
                     self.control.append(cid)
+            else:
+                logging.debug(f'program stderr: {line.decode()}')
         logging.debug(f'fetch {len(self.trace)} trace, {len(self.control)} control')
 
     def __handle_coredump(self, core: str):
@@ -173,17 +180,19 @@ class Crash:
         p.unlink()
 
     def run(self, idx: int | None = None):
+        input_data = None
         if self.use_stdin:
-            # todo
-            return
+            with open(self.file, 'rb') as f:
+                input_data = f.read()
         logging.debug(self.cmd)
         if not idx:
             idx = multiprocessing.current_process().pid
         self.__init(idx)
-        with subprocess.Popen(args=self.cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=self.env,
-                              cwd='/tmp') as process:
+        with subprocess.Popen(args=self.cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              env=self.env, cwd='/tmp') as process:
             try:
-                _, stderr = process.communicate(timeout=10)
+                stdout, stderr = process.communicate(input=input_data, timeout=10)
+                logging.debug(f'program stdout: {stdout.decode()}')
                 self.__handle_stderr(stderr)
                 self.__handle_coredump(f'/tmp/core.{process.pid}')
             except:
@@ -257,7 +266,7 @@ def handle_one_crash(args):
     error = p.parent.joinpath('.error').joinpath(p.name)
     # root/aflout/sync_id/crashes/file
     c = Crash(root, p, error, FuzzResult.get_cmd(sync_id))
-    r = c.run()
+    c.run()
     c.show_control(es)
     c.show_frame(es)
 
@@ -272,6 +281,8 @@ def handle_crashes(args):
 
     results = []
     for repro in r:
+        if not repro:
+            continue
         if not repro.crash_frame:
             continue
         if any(filter(lambda c: repro.same_as(c), results)):
