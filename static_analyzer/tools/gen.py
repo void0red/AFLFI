@@ -1,4 +1,5 @@
 import os
+import subprocess
 from dataclasses import dataclass
 import re
 import argparse
@@ -112,7 +113,7 @@ class DistanceCalc:
 
         return func, i / d
 
-    def run(self, file):
+    def run_and_dump(self, file):
         with Pool(os.cpu_count()) as pool:
             fut = pool.map(self.calc_distance, self.func_node.keys())
             with open(file, 'w') as f:
@@ -124,24 +125,31 @@ class DistanceCalc:
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--file', type=str, default='result.txt')
-    parser.add_argument('--dot', type=str, required=True)
+    parser = argparse.ArgumentParser(description='generate errors.txt and distance.txt in current dir')
+    parser.add_argument('--sa', type=str, required=True, help='static analyzer')
+    parser.add_argument('--bc', type=str, required=True, help='fuzz binary bitcode')
     parser.add_argument('--filter', type=float, default=0.5)
-    parser.add_argument('--alloc', default=False, action='store_true')
+    parser.add_argument('--alloc', default=True, action='store_true')
     parser.add_argument('--prefix', type=str, default='')
     args = parser.parse_args()
 
-    r = simple_parser(args.file)
+    # get callgraph and analyze results
+    sa_path = Path(args.sa).resolve().absolute()
+    bc_path = Path(args.bc).resolve().absolute()
+    assert sa_path.exists() and bc_path.exists()
+
+    subprocess.check_call(['opt', '-enable-new-pm=0', '-disable-output', '--dot-callgraph', str(bc_path)])
+    dot_file = bc_path.parent.joinpath(bc_path.name + '.callgraph.dot')
+    subprocess.check_call([str(sa_path), str(bc_path)])
+
+    r = simple_parser('result.txt')
     targets = do_filter(args, r)
 
-    ef = Path(args.file).resolve().parent.joinpath('errors.txt')
-    dump_error_point(ef, targets)
+    dump_error_point('errors.txt', targets)
 
     targets_func = {}
     for i in targets:
         targets_func.setdefault(i.callee, []).append(i)
 
-    df = Path(args.file).resolve().parent.joinpath('distance.txt')
-    dc = DistanceCalc(args.dot, targets_func)
-    dc.run(df)
+    dc = DistanceCalc(dot_file, targets_func)
+    dc.run_and_dump('distance.txt')
