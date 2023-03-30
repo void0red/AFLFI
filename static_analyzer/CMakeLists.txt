@@ -11,8 +11,10 @@ include_directories(${LLVM_INCLUDE_DIRS})
 add_definitions(${LLVM_DEFINITIONS})
 link_directories(${LLVM_LIBRARY_DIRS})
 
+llvm_map_components_to_libnames(llvm_libs support core irreader analysis passes)
+
 add_executable(StaticAnalyser main.cpp DataFlowGraph.cpp)
-target_link_libraries(StaticAnalyser LLVM)
+target_link_libraries(StaticAnalyser ${llvm_libs})
 
 add_executable(StaticAnalyser2 main2.cpp DataFlowGraph.cpp)
-target_link_libraries(StaticAnalyser2 LLVM)
+target_link_libraries(StaticAnalyser2 ${llvm_libs})
