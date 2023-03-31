@@ -131,6 +131,10 @@ if __name__ == '__main__':
     parser.add_argument('--filter', type=float, default=0.5)
     parser.add_argument('--alloc', default=True, action='store_true')
     parser.add_argument('--prefix', type=str, default='')
+    parser.add_argument('--stage1', default=False, action='store_true', help='gen callgraph')
+    parser.add_argument('--stage2', default=False, action='store_true', help='gen result.txt')
+    parser.add_argument('--stage3', default=False, action='store_true', help='gen errors.txt and distance.txt')
+
     args = parser.parse_args()
 
     # get callgraph and analyze results
@@ -138,18 +142,20 @@ if __name__ == '__main__':
     bc_path = Path(args.bc).resolve().absolute()
     assert sa_path.exists() and bc_path.exists()
 
-    subprocess.check_call(['opt', '-enable-new-pm=0', '-disable-output', '--dot-callgraph', str(bc_path)])
     dot_file = bc_path.parent.joinpath(bc_path.name + '.callgraph.dot')
-    subprocess.check_call([str(sa_path), str(bc_path)])
 
-    r = simple_parser('result.txt')
-    targets = do_filter(args, r)
+    if not dot_file.exists() or args.stage1:
+        subprocess.check_call(['opt', '-enable-new-pm=0', '-disable-output', '--dot-callgraph', str(bc_path)])
 
-    dump_error_point('errors.txt', targets)
+    if not Path('result.txt').exists() or args.stage2:
+        subprocess.check_call([str(sa_path), str(bc_path)])
 
-    targets_func = {}
-    for i in targets:
-        targets_func.setdefault(i.callee, []).append(i)
-
-    dc = DistanceCalc(dot_file, targets_func)
-    dc.run_and_dump('distance.txt')
+    if not Path('errors.txt').exists() or not Path('distance.txt').exists() or args.stage1 or args.stage2 or args.stage3:
+        r = simple_parser('result.txt')
+        targets = do_filter(args, r)
+        dump_error_point('errors.txt', targets)
+        targets_func = {}
+        for i in targets:
+            targets_func.setdefault(i.callee, []).append(i)
+        dc = DistanceCalc(dot_file, targets_func)
+        dc.run_and_dump('distance.txt')
