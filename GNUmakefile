@@ -326,9 +326,15 @@ endif
 	@echo
 
 .PHONY: llvm
-llvm:
+llvm: fault
 	-$(MAKE) -j$(nproc) -f GNUmakefile.llvm
 	@test -e afl-cc || { echo "[-] Compiling afl-cc failed. You seem not to have a working compiler." ; exit 1; }
+
+.PHONY: fault
+fault:
+	@$(CC) $(CFLAGS) -c fault_injection/rt.c -o fj-rt.o
+	@cmake -S fault_injection/analyzer -B fault_injection/build
+	@cmake --build fault_injection/build
 
 .PHONY: gcc_plugin
 gcc_plugin:

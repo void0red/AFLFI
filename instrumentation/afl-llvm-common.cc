@@ -600,3 +600,130 @@ unsigned long long int calculateCollisions(uint32_t edges) {
 
 }
 
+#include <llvm/IR/InstIterator.h>
+#include <llvm/Transforms/Utils/BasicBlockUtils.h>
+llvm::Instruction *InstPlugin::setNoSanitize(llvm::Instruction *v) {
+  v->setMetadata(noSanitizeKindId, noSanitizeNode);
+  return v;
+}
+
+void InstPlugin::runOnModule(llvm::Module &M) {
+  IRBuilder<> IRB(M.getContext());
+  FaultInjectionControlFunc = M.getOrInsertFunction(
+      FaultInjectionControlName, IRB.getInt1Ty(), IRB.getVoidTy());
+  FaultInjectionDistanceFunc = M.getOrInsertFunction(
+      FaultInjectionDistanceName, IRB.getVoidTy(), IRB.getInt32Ty());
+  noSanitizeKindId = M.getMDKindID("nosanitize");
+  noSanitizeNode = MDNode::get(M.getContext(), None);
+
+  loadErrFunc(getenv("FJ_ERR"));
+  loadDistance(getenv("FJ_DIS"));
+
+  CollectInsertPoint(&M);
+  InsertControl(&M);
+}
+
+static std::vector<const char *> blackList{
+    "bcmp",    "memchr",      "memchr_inv", "memcmp",  "memscan",
+    "stpcpy",  "strcasecmp",  "strcat",     "strchr",  "strchrnul",
+    "strcmp",  "strcpy",      "strcspn",    "strlcat", "strlcpy",
+    "strlen",  "strncasecmp", "strncat",    "strnchr", "strnchrnul",
+    "strncmp", "strncpy",     "strnlen",    "strnstr", "strpbrk",
+    "strrchr", "strscpy",     "strsep",     "strspn",  "strst"};
+
+
+void InstPlugin::CollectInsertPoint(llvm::Module *m) {
+  for (auto &func : m->functions()) {
+    int counter = 0;
+    if (func.empty() || func.isIntrinsic() || isIgnoreFunction(&func)) continue;
+    for (auto &inst : instructions(func)) {
+      auto *callInst = dyn_cast<CallInst>(&inst);
+      if (!callInst) continue;
+      auto *callee =
+          dyn_cast<Function>(callInst->getCalledOperand()->stripPointerCasts());
+      if (!callee || callee->isIntrinsic() || !callee->hasName() ||
+          isIgnoreFunction(callee) || !callee->getReturnType()->isIntOrPtrTy())
+        continue;
+
+      auto fn = callee->getName().split('.').first.str();
+
+      if (std::any_of(blackList.begin(), blackList.end(),
+                      [=](const char *prefix) { return fn == prefix; }))
+        continue;
+      if (errorFuncs.find(fn) != errorFuncs.end()) {
+        errorSite[callInst] = counter++;
+      }
+    }
+  }
+}
+
+void InstPlugin::InsertControl(llvm::Module *m) {
+  IRBuilder<> IRB(m->getContext());
+  for (const auto &pair : errorSite) {
+    auto   es = pair.first;
+    Value *zero{nullptr};
+    auto   retType = es->getType();
+    if (retType->isPointerTy())
+      zero = ConstantPointerNull::get(cast<PointerType>(retType));
+    else
+      zero = ConstantInt::get(retType, -1, true);
+
+    IRB.SetInsertPoint(es);
+
+    auto check = IRB.CreateCall(FaultInjectionControlFunc);
+    setNoSanitize(check);
+    auto cmp = IRB.CreateICmpEQ(check, IRB.getInt1(false));
+    setNoSanitize(cast<CmpInst>(cmp));
+
+    auto thenTerm = SplitBlockAndInsertIfThen(cmp, es, false);
+    setNoSanitize(thenTerm);
+    auto nextBlock = thenTerm->getSuccessor(0);
+    IRB.SetInsertPoint(nextBlock, nextBlock->getFirstInsertionPt());
+
+    auto phi = IRB.CreatePHI(es->getType(), 2);
+    setNoSanitize(phi);
+
+    es->moveBefore(thenTerm);
+    es->replaceAllUsesWith(phi);
+
+    phi->addIncoming(es, thenTerm->getParent());
+    phi->addIncoming(zero, check->getParent());
+  }
+}
+
+bool InstPlugin::loadErrFunc(const char *name) {
+  if (name == nullptr) return false;
+  std::ifstream f(name);
+  if (!f.is_open()) return false;
+
+  std::string buf;
+  while (std::getline(f, buf)) {
+    StringRef bufp(buf);
+    errorFuncs.insert(bufp.trim().str());
+  }
+  return true;
+}
+
+bool InstPlugin::loadDistance(const char *name) {
+  if (name == nullptr) return false;
+  std::ifstream f(name);
+  if (!f.is_open()) return false;
+
+  std::string buf;
+  while (std::getline(f, buf)) {
+    StringRef bufp(buf);
+    auto      i = bufp.split(',');
+    if (i.second.empty()) continue;
+    unsigned long long dis = 0;
+    if (getAsUnsignedInteger(i.second.trim(), 10, dis)) continue;
+    distance[i.first.trim().str()] = dis;
+  }
+  return true;
+}
+
+PreservedAnalyses FaultInjectionPass::run(Module                &M,
+                                          ModuleAnalysisManager &MAM) {
+  auto plugin = std::make_shared<InstPlugin>();
+  plugin->runOnModule(M);
+  return PreservedAnalyses::none();
+}

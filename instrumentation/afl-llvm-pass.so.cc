@@ -132,6 +132,7 @@ llvmGetPassPluginInfo() {
                 [](ModulePassManager &MPM, OptimizationLevel OL) {
 
                   MPM.addPass(AFLCoverage());
+                  MPM.addPass(FaultInjectionPass());
 
                 });
 

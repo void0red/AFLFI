@@ -67,3 +67,40 @@ IS_EXTERN int be_quiet;
 
 #endif
 
+#include <unordered_map>
+#include <unordered_set>
+#include <llvm/Passes/PassBuilder.h>
+class InstPlugin {
+ private:
+  const char *FaultInjectionControlName = "__fault_injection_control";
+  const char *FaultInjectionDistanceName = "__fault_injection_distance";
+
+  llvm::FunctionCallee FaultInjectionControlFunc;
+  llvm::FunctionCallee FaultInjectionDistanceFunc;
+
+  unsigned           noSanitizeKindId{0};
+  llvm::MDNode      *noSanitizeNode{nullptr};
+  llvm::Instruction *setNoSanitize(llvm::Instruction *v);
+
+  std::unordered_set<std::string>           errorFuncs;
+  std::unordered_map<std::string, unsigned> distance;
+  bool                                      loadErrFunc(const char *name);
+  bool                                      loadDistance(const char *name);
+
+  std::unordered_map<llvm::CallInst *, uint32_t> errorSite;
+
+  void CollectInsertPoint(llvm::Module *m);
+
+  void InsertControl(llvm::Module *m);
+
+  void InsertDistance(llvm::Module *m);
+
+ public:
+  void runOnModule(llvm::Module &M);
+};
+
+class FaultInjectionPass : public llvm::PassInfoMixin<FaultInjectionPass> {
+ public:
+  llvm::PreservedAnalyses run(llvm::Module                &M,
+                              llvm::ModuleAnalysisManager &MAM);
+};
