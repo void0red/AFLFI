@@ -248,6 +248,7 @@ enum {
   /* 19 */ STAGE_CUSTOM_MUTATOR,
   /* 20 */ STAGE_COLORIZATION,
   /* 21 */ STAGE_ITS,
+  /* 22 */ STAGE_FJ,
 
   STAGE_NUM_MAX
 
@@ -427,6 +428,8 @@ struct foreign_sync {
   time_t mtime;
 
 };
+
+#include "fault.h"
 
 typedef struct afl_state {
 
@@ -786,6 +789,7 @@ typedef struct afl_state {
   u32   bitsmap_size;
 #endif
 
+  struct Manager *mgr;
 } afl_state_t;
 
 struct custom_mutator {

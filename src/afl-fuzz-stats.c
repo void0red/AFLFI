@@ -1175,7 +1175,14 @@ void show_stats_normal(afl_state_t *afl) {
 
   }
 
-  SAYF(bV bSTOP "py/custom/rq : " cRST "%-36s " bSTG bVR bH20 bH2 bH bRB "\n",
+  SAYF(bV bSTOP "py/custom/rq : " cRST "%-36s " bSTG bVR cRST "%23s" bSTG bV "\n",
+       tmp, " ");
+
+  tmp[0] = '\0';
+  strcat(tmp, u_stringify_int(IB(0), afl->stage_finds[STAGE_FJ]));
+  strcat(tmp, "/");
+  strcat(tmp, u_stringify_int(IB(1), afl->stage_cycles[STAGE_FJ]));
+  SAYF(bV bSTOP "fault inject : " cRST "%-36s " bSTG bVR bH20 bH2 bH bRB "\n",
        tmp);
 
   if (likely(afl->disable_trim)) {
@@ -2018,9 +2025,15 @@ void show_stats_pizza(afl_state_t *afl) {
 
   }
 
-  SAYF(bV bSTOP "                      py/custom/rq : " cRST
-                "%-36s  " bSTG bVR bH20 bH2 bH30 bH2 bH bH bRB "\n",
-       tmp);
+  SAYF(bV bSTOP "py/custom/rq : " cRST "%-36s " bSTG bVR cRST "%23s" bSTG bV
+                "\n",
+       tmp, " ");
+
+  tmp[0] = '\0';
+  strcat(tmp, u_stringify_int(IB(0), afl->stage_finds[STAGE_FJ]));
+  strcat(tmp, "/");
+  strcat(tmp, u_stringify_int(IB(1), afl->stage_cycles[STAGE_FJ]));
+  SAYF(bV bSTOP "fault inject : " cRST "%-36s " bSTG bVR "\n", tmp);
 
   if (likely(afl->disable_trim)) {
 

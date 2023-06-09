@@ -1908,7 +1908,7 @@ custom_mutator_stage:
    * CUSTOM MUTATORS *
    *******************/
 
-  if (likely(!afl->custom_mutators_count)) { goto havoc_stage; }
+  if (likely(!afl->custom_mutators_count)) { goto fault_stage; }
 
   afl->stage_name = "custom mutator";
   afl->stage_short = "custom";
@@ -2048,6 +2048,50 @@ custom_mutator_stage:
 #ifdef INTROSPECTION
   afl->queue_cur->stats_mutated += afl->stage_max;
 #endif
+
+/*
+ * do fault injection here
+ */
+fault_stage:
+  afl->stage_name = "fault injection";
+  afl->stage_short = "fault";
+  afl->stage_cur = 0;
+  afl->stage_val_type = STAGE_VAL_NONE;
+  orig_hit_cnt = afl->queued_items + afl->saved_crashes;
+  struct Manager *mgr = afl->mgr;
+
+  switch (fj_init_run(mgr, afl->queue_cur->fname, (fuzz_func)common_fuzz_stuff,
+                      afl, out_buf, len)) {
+    case FJ_INIT_NORMAL:
+      break;
+    case FJ_INIT_SKIP:
+      goto havoc_stage;
+    case FJ_INIT_ERROR:
+      goto abandon_entry;
+  }
+
+  afl->stage_cur = 0;
+  while (fj_continue_run(mgr)) {
+    switch (fj_next_run(mgr)) {
+      case FJ_RUN_NEXT:
+        // new cover
+        if (afl->queued_items != havoc_queued) {
+          havoc_queued = afl->queued_items;
+          fj_save_current(mgr);
+        }
+        // fallthrough
+      case FJ_RUN_SAVED:
+        afl->stage_cur += 1;
+        break;
+      case FJ_RUN_EMPTY:
+        break;
+      case FJ_RUN_ERROR:
+        goto abandon_entry;
+    }
+  }
+  afl->stage_finds[STAGE_FJ] +=
+      afl->queued_items + afl->saved_crashes - orig_hit_cnt;
+  afl->stage_cycles[STAGE_FJ] += afl->stage_cur;
 
   /****************
    * RANDOM HAVOC *

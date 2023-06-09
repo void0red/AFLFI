@@ -182,6 +182,7 @@ ifeq "$(SYS)" "Haiku"
 endif
 
 AFL_FUZZ_FILES = $(wildcard src/afl-fuzz*.c)
+AFL_FUZZ_OBJS = $(patsubst %.c,%.o,$(notdir $(AFL_FUZZ_FILES)))
 
 ifneq "$(shell command -v python3m 2>/dev/null)" ""
   ifneq "$(shell command -v python3m-config 2>/dev/null)" ""
@@ -268,7 +269,7 @@ ifneq "$(findstring OpenBSD, $(SYS))" ""
   override LDFLAGS += -lpthread
 endif
 
-COMM_HDR    = include/alloc-inl.h include/config.h include/debug.h include/types.h
+COMM_HDR    = include/alloc-inl.h include/config.h include/debug.h include/types.h include/fault.h
 
 ifeq "$(shell echo '$(HASH)include <Python.h>@int main() {return 0; }' | tr @ '\n' | $(CC) $(CFLAGS) -x c - -o .test $(PYTHON_INCLUDE) $(LDFLAGS) $(PYTHON_LIB) 2>/dev/null && echo 1 || echo 0 ; rm -f .test )" "1"
 	PYTHON_OK=1
@@ -326,13 +327,20 @@ endif
 	@echo
 
 .PHONY: llvm
-llvm: fault
+llvm:
 	-$(MAKE) -j$(nproc) -f GNUmakefile.llvm
 	@test -e afl-cc || { echo "[-] Compiling afl-cc failed. You seem not to have a working compiler." ; exit 1; }
 
-.PHONY: fault
-fault:
-	@$(CC) $(CFLAGS) -c fault_injection/rt.c -o fj-rt.o
+.PHONY: fault fault-rt fault.o fault-analyzer
+fault: fault-rt fault.o fault-analyzer
+
+fault-rt:
+	-$(CC) $(CFLAGS) -c fault_injection/rt.c -o fj-rt.o
+
+fault.o:
+	-$(CXX) -c -O2 -g fault_injection/fault.cpp -Iinclude -o fault.o
+
+fault-analyzer:
 	@cmake -S fault_injection/analyzer -B fault_injection/build
 	@cmake --build fault_injection/build
 
@@ -461,8 +469,11 @@ src/afl-forkserver.o : $(COMM_HDR) src/afl-forkserver.c include/forkserver.h
 src/afl-sharedmem.o : $(COMM_HDR) src/afl-sharedmem.c include/sharedmem.h
 	$(CC) $(CFLAGS) $(CFLAGS_FLTO) -c src/afl-sharedmem.c -o src/afl-sharedmem.o
 
-afl-fuzz: $(COMM_HDR) include/afl-fuzz.h $(AFL_FUZZ_FILES) src/afl-common.o src/afl-sharedmem.o src/afl-forkserver.o src/afl-performance.o | test_x86
-	$(CC) $(CFLAGS) $(COMPILE_STATIC) $(CFLAGS_FLTO) $(AFL_FUZZ_FILES) src/afl-common.o src/afl-sharedmem.o src/afl-forkserver.o src/afl-performance.o -o $@ $(PYFLAGS) $(LDFLAGS) -lm
+afl_objs: $(COMM_HDR) $(AFL_FUZZ_FILES)
+	$(CC) $(CFLAGS) $(CFLAGS_FLTO) -c $(AFL_FUZZ_FILES)
+
+afl-fuzz: $(COMM_HDR) include/afl-fuzz.h afl_objs $(AFL_FUZZ_OBJS) fault src/afl-common.o src/afl-sharedmem.o src/afl-forkserver.o src/afl-performance.o
+	$(CXX) $(COMPILE_STATIC) $(AFL_FUZZ_OBJS) fault.o src/afl-common.o src/afl-sharedmem.o src/afl-forkserver.o src/afl-performance.o -o $@ $(PYFLAGS) $(LDFLAGS) -lm -lrt
 
 afl-showmap: src/afl-showmap.c src/afl-common.o src/afl-sharedmem.o src/afl-forkserver.o src/afl-performance.o $(COMM_HDR) | test_x86
 	$(CC) $(CFLAGS) $(COMPILE_STATIC) $(CFLAGS_FLTO) src/$@.c src/afl-fuzz-mutators.c src/afl-fuzz-python.c src/afl-common.o src/afl-sharedmem.o src/afl-forkserver.o src/afl-performance.o -o $@ $(PYFLAGS) $(LDFLAGS)

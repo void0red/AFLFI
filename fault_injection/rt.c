@@ -11,9 +11,13 @@
 #include <execinfo.h>
 static struct ctl_block *cb;
 static FILE             *debug_stream;
-static uint32_t          failth = 0;
 static bool              __init_done = false;
 static bool              __afl_debug = false;
+
+__attribute__((destructor)) void __fault_injection_finit() {
+  if (!__init_done || !cb) return;
+  cb->on = 0;
+}
 
 __attribute__((constructor(10086))) void __fault_injection_init() {
   if (__init_done) return;
@@ -50,8 +54,16 @@ __attribute__((constructor(10086))) void __fault_injection_init() {
 }
 
 static inline void do_log(uint64_t addr) {
+  uint64_t *slot = &cb->trace_addr[cb->trace_size];
+  if ((void *)slot >= CTL_BLOCK_END(cb)) {
+    fprintf(stderr, "full track buffer\n");
+    return;
+  }
+  *slot = addr;
+  cb->trace_size += 1;
+
   if (!debug_stream) return;
-  fprintf(debug_stream, "failth %d, addr 0x%lx\n", failth, addr);
+  fprintf(debug_stream, "failth %d, addr 0x%lx\n", cb->hit, addr);
 
   if (cb->log_lvl > 1) {
 #define STACK_BUFFER_SIZE 128
@@ -66,9 +78,14 @@ static inline void do_log(uint64_t addr) {
 }
 
 bool __fault_injection_control() {
-  if (!__init_done) return false;
+  if (!__init_done || !cb || !cb->on) return false;
   uint64_t addr = (uint64_t)__builtin_return_address(0);
   cb->hit++;
+  if (cb->on == 1) {
+    do_log(addr);
+    return false;
+  }
+
   for (uint32_t i = 0; i < cb->disable_size; ++i) {
     if (addr == cb->disable_addr[i]) return false;
   }
@@ -80,9 +97,8 @@ bool __fault_injection_control() {
     }
   }
 
-  failth += 1;
   for (uint32_t i = 0; i < cb->fail_size; ++i) {
-    if (failth == cb->fails[i]) {
+    if (cb->hit == cb->fails[i]) {
       do_log(addr);
       return true;
     }

@@ -5,7 +5,7 @@
 # GCC 11 is used instead of 12 because genhtml for afl-cov doesn't like it.
 #
 
-FROM ubuntu:22.04 AS aflplusplus
+FROM ubuntu:22.04 AS aflfi
 LABEL "maintainer"="AFL++ team <afl@aflplus.plus>"
 LABEL "about"="AFLplusplus container image"
 
@@ -84,14 +84,15 @@ ARG CC=gcc-$GCC_VERSION
 ARG CXX=g++-$GCC_VERSION
 
 # Used in CI to prevent a 'make clean' which would remove the binaries to be tested
-ARG TEST_BUILD
-
-RUN sed -i.bak 's/^	-/	/g' GNUmakefile && \
-    make clean && make distrib && \
-    ([ "${TEST_BUILD}" ] || (make install && make clean)) && \
-    mv GNUmakefile.bak GNUmakefile
+#ARG TEST_BUILD
+#
+#RUN sed -i.bak 's/^	-/	/g' GNUmakefile && \
+#    make clean && make distrib && \
+#    ([ "${TEST_BUILD}" ] || (make install && make clean)) && \
+#    mv GNUmakefile.bak GNUmakefile
+RUN make clean && make -j
 
 RUN echo "set encoding=utf-8" > /root/.vimrc && \
     echo ". /etc/bash_completion" >> ~/.bashrc && \
     echo 'alias joe="joe --wordwrap --joe_state -nobackup"' >> ~/.bashrc && \
-    echo "export PS1='"'[AFL++ \h] \w \$ '"'" >> ~/.bashrc
+    echo "export PS1='"'[AFLFI \h] \w \$ '"'" >> ~/.bashrc

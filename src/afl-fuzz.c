@@ -1406,6 +1406,12 @@ int main(int argc, char **argv_orig, char **envp) {
 
   }
 
+  if (afl->sync_id) {
+    afl->mgr = fj_init(afl->sync_id);
+  } else {
+    afl->mgr = fj_init("default");
+  }
+
   if (!strcmp(afl->in_dir, afl->out_dir)) {
 
     FATAL("Input and output directories can't be the same");
