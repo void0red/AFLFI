@@ -77,7 +77,7 @@ ENV AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1
 RUN git clone --depth=1 https://github.com/vanhauser-thc/afl-cov && \
     (cd afl-cov && make install) && rm -rf afl-cov
 
-WORKDIR /AFLplusplus
+WORKDIR /AFLFI
 COPY . .
 
 ARG CC=gcc-$GCC_VERSION

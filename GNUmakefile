@@ -620,7 +620,7 @@ clean:
 	-$(MAKE) -C qemu_mode/libcompcov clean
 	-$(MAKE) -C qemu_mode/libqasan clean
 	-$(MAKE) -C frida_mode clean
-	rm -rf nyx_mode/packer/linux_initramfs/init.cpio.gz nyx_mode/libnyx/libnyx/target/release/* nyx_mode/QEMU-Nyx/x86_64-softmmu/qemu-system-x86_64
+	rm -rf nyx_mode/packer/linux_initramfs/init.cpio.gz nyx_mode/libnyx/libnyx/target/release/* nyx_mode/QEMU-Nyx/x86_64-softmmu/qemu-system-x86_64 fault_injection/build
 ifeq "$(IN_REPO)" "1"
 	-test -e coresight_mode/coresight-trace/Makefile && $(MAKE) -C coresight_mode/coresight-trace clean || true
 	-test -e qemu_mode/qemuafl/Makefile && $(MAKE) -C qemu_mode/qemuafl clean || true

@@ -2,574 +2,575 @@
 // Created by void0red on 23-6-6.
 //
 #include <llvm/Analysis/MemorySSA.h>
+#include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/IRReader/IRReader.h>
+#include <llvm/Passes/PassBuilder.h>
+#include <llvm/Passes/PassPlugin.h>
+#include <llvm/Support/CommandLine.h>
+#include <fstream>
+#include <sstream>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include <llvm/Support/CommandLine.h>
-#include <fstream>
 #include "threadpool.h"
-#include <llvm/IR/InstIterator.h>
-#include <llvm/Passes/PassBuilder.h>
-#include <llvm/Passes/PassPlugin.h>
-#include <llvm/IRReader/IRReader.h>
-#include <llvm/IR/InstIterator.h>
-#include <sstream>
 
 using namespace llvm;
 
+static cl::OptionCategory    DefaultCat("default category");
+static cl::list<std::string> InputFiles(cl::Positional, cl::ZeroOrMore,
+                                        cl::desc("<input file(s)>"),
+                                        cl::cat(DefaultCat));
+static cl::opt<std::string>  InputList("list", cl::Optional,
+                                       cl::desc("<list file>"),
+                                       cl::cat(DefaultCat));
+
+static cl::opt<std::string> ErrFile("errs", cl::Optional, cl::init("-"),
+                                    cl::desc("<output errs file>"),
+                                    cl::cat(DefaultCat));
+
+static cl::opt<bool> OnlyLib("onlylib", cl::desc("only focus on lib function"),
+                             cl::cat(DefaultCat));
 
 struct ErrorHandler {
-    std::vector<hash_code> data;
+  std::vector<hash_code> data;
 
-    explicit ErrorHandler(ArrayRef<BasicBlock *> BBs) {
-        for (auto *bb: BBs) {
-            for (auto &inst: *bb) {
-                if (isa<IntrinsicInst>(&inst))
-                    continue;
-                data.emplace_back(getHash(inst));
-            }
-        }
+  explicit ErrorHandler(ArrayRef<BasicBlock *> BBs) {
+    for (auto *bb : BBs) {
+      for (auto &inst : *bb) {
+        if (isa<IntrinsicInst>(&inst)) continue;
+        data.emplace_back(getHash(inst));
+      }
     }
+  }
 
-private:
-    static hash_code getHash(const Instruction &Inst) {
-        SmallVector<Type *, 4> OperTypes;
-        for (Value *V: Inst.operands())
-            OperTypes.push_back(V->getType());
+ private:
+  static hash_code getHash(const Instruction &Inst) {
+    SmallVector<Type *, 4> OperTypes;
+    for (Value *V : Inst.operands())
+      OperTypes.push_back(V->getType());
 
-        if (auto *cmpInst = dyn_cast<CmpInst>(&Inst))
-            return llvm::hash_combine(
-                    llvm::hash_value(Inst.getOpcode()),
-                    llvm::hash_value(Inst.getType()),
-                    llvm::hash_value(cmpInst->getPredicate()),
-                    llvm::hash_combine_range(OperTypes.begin(), OperTypes.end()));
+    if (auto *cmpInst = dyn_cast<CmpInst>(&Inst))
+      return llvm::hash_combine(
+          llvm::hash_value(Inst.getOpcode()), llvm::hash_value(Inst.getType()),
+          llvm::hash_value(cmpInst->getPredicate()),
+          llvm::hash_combine_range(OperTypes.begin(), OperTypes.end()));
 
-        if (auto *callInst = dyn_cast<CallInst>(&Inst)) {
-            auto *callee = dyn_cast<Function>(callInst->getCalledOperand()->stripPointerCasts());
-            if (callee->isIntrinsic() || !callee->hasName())
-                goto default_;
-            std::string FunctionName = callee->getName().str();
-            return llvm::hash_combine(
-                    llvm::hash_value(Inst.getOpcode()),
-                    llvm::hash_value(Inst.getType()),
-                    llvm::hash_value(Inst.getType()), llvm::hash_value(FunctionName),
-                    llvm::hash_combine_range(OperTypes.begin(), OperTypes.end()));
-        }
-        default_:
-        return llvm::hash_combine(
-                llvm::hash_value(Inst.getOpcode()),
-                llvm::hash_value(Inst.getType()),
-                llvm::hash_combine_range(OperTypes.begin(), OperTypes.end()));
+    if (auto *callInst = dyn_cast<CallInst>(&Inst)) {
+      auto *callee =
+          dyn_cast<Function>(callInst->getCalledOperand()->stripPointerCasts());
+      if (!callee || callee->isIntrinsic() || !callee->hasName()) goto default_;
+      std::string FunctionName = callee->getName().str();
+      return llvm::hash_combine(
+          llvm::hash_value(Inst.getOpcode()), llvm::hash_value(Inst.getType()),
+          llvm::hash_value(Inst.getType()), llvm::hash_value(FunctionName),
+          llvm::hash_combine_range(OperTypes.begin(), OperTypes.end()));
     }
+  default_:
+    return llvm::hash_combine(
+        llvm::hash_value(Inst.getOpcode()), llvm::hash_value(Inst.getType()),
+        llvm::hash_combine_range(OperTypes.begin(), OperTypes.end()));
+  }
 };
 
 struct Node {
-    llvm::Instruction *inst;
-    std::unordered_set<Node *> inComing;
-    std::unordered_set<Node *> outComing;
+  llvm::Instruction         *inst;
+  std::unordered_set<Node *> inComing;
+  std::unordered_set<Node *> outComing;
 
-    explicit Node(llvm::Instruction *inst) : inst(inst) {}
+  explicit Node(llvm::Instruction *inst) : inst(inst) {
+  }
 
-    bool addOut(Node *node) {
-        this->outComing.insert(node);
-        node->inComing.insert(this);
-        return true;
-    }
+  bool addOut(Node *node) {
+    this->outComing.insert(node);
+    node->inComing.insert(this);
+    return true;
+  }
 };
 
 class DataFlowGraph {
-    llvm::Instruction *root;
-    llvm::MemorySSA &mSSA;
-    llvm::DominatorTree &DT;
-    std::vector<llvm::Instruction *> workList;
-    std::unordered_map<llvm::Instruction *, Node *> inst2Node;
-    std::unordered_set<Node *> nodeSet;
-    std::unordered_set<llvm::Value *> visited;
+  llvm::Instruction                              *root;
+  llvm::MemorySSA                                &mSSA;
+  llvm::DominatorTree                            &DT;
+  std::vector<llvm::Instruction *>                workList;
+  std::unordered_map<llvm::Instruction *, Node *> inst2Node;
+  std::unordered_set<Node *>                      nodeSet;
+  std::unordered_set<llvm::Value *>               visited;
 
-    using Path = std::vector<Node *>;
-    using BBVec = std::vector<BasicBlock *>;
+  using Path = std::vector<Node *>;
+  using BBVec = std::vector<BasicBlock *>;
 
-    std::unordered_map<llvm::Instruction *, Path> checkedList;
-    bool debug{false};
+  std::unordered_map<llvm::Instruction *, Path> checkedList;
+  bool                                          debug{false};
 
+  bool elemVisited(llvm::Value *elem, bool noInsert = false) {
+    if (visited.find(elem) == visited.end()) {
+      if (!noInsert) visited.insert(elem);
+      return false;
+    }
+    return true;
+  }
 
-    bool elemVisited(llvm::Value *elem, bool noInsert = false) {
-        if (visited.find(elem) == visited.end()) {
-            if (!noInsert)
-                visited.insert(elem);
-            return false;
+  void handleStore(llvm::StoreInst *inst) {
+    auto *storeMA = mSSA.getMemoryAccess(inst);
+    auto  storeNode = getNode(inst);
+
+    // opt -passes='print<memoryssa>' -disable-output
+    std::vector<Value *> toFindUse(storeMA->user_begin(), storeMA->user_end());
+    // we ignore the callInst can modify the mem, so we also check the mem
+    // layout in the same block
+    for (auto i = inst->getNextNonDebugInstruction(); i;
+         i = i->getNextNonDebugInstruction()) {
+      if (isa<CallInst>(i)) {
+        auto *callMA = mSSA.getMemoryAccess(i);
+        if (!callMA || callMA == storeMA) continue;
+        toFindUse.insert(toFindUse.end(), callMA->user_begin(),
+                         callMA->user_end());
+      } else {
+        break;
+      }
+    }
+    bool find = false;
+    while (!toFindUse.empty()) {
+      auto *back = toFindUse.back();
+      toFindUse.pop_back();
+      if (elemVisited(back)) continue;
+      if (auto *mu = dyn_cast<MemoryUse>(back)) {
+        if (auto *loadInst = dyn_cast<LoadInst>(mu->getMemoryInst())) {
+          storeNode->addOut(getNode(loadInst));
+          workList.push_back(loadInst);
+          find = true;
         }
+      } else if (auto *md = dyn_cast<MemoryDef>(back)) {
+        if (debug) {
+          dbgs() << "MemoryDef :";
+          md->getMemoryInst()->print(dbgs());
+          dbgs() << '\n';
+        }
+        if (isa_and_nonnull<CallInst>(md->getMemoryInst())) {
+          toFindUse.insert(toFindUse.end(), md->user_begin(), md->user_end());
+        }
+      } else if (auto *mphi = dyn_cast<MemoryPhi>(back)) {
+        toFindUse.insert(toFindUse.end(), mphi->user_begin(), mphi->user_end());
+      }
+    }
+    if (!find) {
+      // use legacy method, load and store share the same addr
+      auto storePtr = inst->getPointerOperand()->stripPointerCasts();
+      for (auto ni = inst->getNextNonDebugInstruction(); ni;
+           ni = ni->getNextNonDebugInstruction()) {
+        if (auto *loadInst = dyn_cast<LoadInst>(ni)) {
+          if (loadInst->getPointerOperand()->stripPointerCasts() == storePtr) {
+            storeNode->addOut(getNode(loadInst));
+            workList.push_back(loadInst);
+            find = true;
+          }
+        }
+      }
+    }
+
+    if (debug && !find) {
+      dbgs() << "Can't find load for ";
+      inst->print(dbgs());
+      dbgs() << '\n';
+      mSSA.print(dbgs());
+    }
+  }
+
+  bool backwardSave(Node                                          *node,
+                    std::unordered_map<llvm::Instruction *, Path> &saved) {
+    auto check = saved.find(node->inst);
+    assert(check == saved.end());
+
+    using Stack = std::vector<Node *>;
+    Stack              mainStack{node};
+    std::vector<Stack> auxStack{
+        Stack{node->inComing.begin(), node->inComing.end()}};
+    auto end = getNode(root);
+
+    while (!mainStack.empty()) {
+      auto &auxTop = auxStack.back();
+      if (!auxTop.empty()) {
+        auto *n = auxTop.back();
+        auxTop.pop_back();
+        mainStack.push_back(n);
+        auto nAdj = n->inComing;
+        for (auto i : mainStack) {
+          auto iter = nAdj.find(i);
+          if (iter != nAdj.end()) { nAdj.erase(iter); }
+        }
+        auxStack.emplace_back(nAdj.begin(), nAdj.end());
+      } else {
+        mainStack.pop_back();
+        auxStack.pop_back();
+        continue;
+      }
+      if (mainStack.back() == end) { saved[node->inst] = Path{mainStack}; }
+    }
+    return true;
+  }
+
+  static bool extractIntValue(llvm::Value *v, int64_t &ret) {
+    if (auto *ci = dyn_cast<ConstantInt>(v)) {
+      ret = ci->getValue().sextOrTrunc(64).getSExtValue();
+      return true;
+    } else if (auto *ce = dyn_cast<ConstantExpr>(v)) {
+      if (auto *i = dyn_cast<ConstantInt>(ce->getOperand(0))) {
+        ret = i->getValue().sextOrTrunc(64).getSExtValue();
         return true;
+      }
+    } else if (isa<ConstantPointerNull>(v)) {
+      ret = 0;
+      return true;
     }
+    return false;
+  }
 
-    void handleStore(llvm::StoreInst *inst) {
-        auto *storeMA = mSSA.getMemoryAccess(inst);
-        auto storeNode = getNode(inst);
-
-        //opt -passes='print<memoryssa>' -disable-output
-        std::vector<Value *> toFindUse(storeMA->user_begin(), storeMA->user_end());
-        // we ignore the callInst can modify the mem, so we also check the mem layout in the same block
-        for (auto i = inst->getNextNonDebugInstruction(); i; i = i->getNextNonDebugInstruction()) {
-            if (isa<CallInst>(i)) {
-                auto *callMA = mSSA.getMemoryAccess(i);
-                if (!callMA || callMA == storeMA) continue;
-                toFindUse.insert(toFindUse.end(), callMA->user_begin(), callMA->user_end());
-            } else {
-                break;
-            }
-        }
-        bool find = false;
-        while (!toFindUse.empty()) {
-            auto *back = toFindUse.back();
-            toFindUse.pop_back();
-            if (elemVisited(back))continue;
-            if (auto *mu = dyn_cast<MemoryUse>(back)) {
-                if (auto *loadInst = dyn_cast<LoadInst>(mu->getMemoryInst())) {
-                    storeNode->addOut(getNode(loadInst));
-                    workList.push_back(loadInst);
-                    find = true;
-                }
-            } else if (auto *md = dyn_cast<MemoryDef>(back)) {
-                if (debug) {
-                    dbgs() << "MemoryDef :";
-                    md->getMemoryInst()->print(dbgs());
-                    dbgs() << '\n';
-                }
-                if (isa_and_nonnull<CallInst>(md->getMemoryInst())) {
-                    toFindUse.insert(toFindUse.end(), md->user_begin(), md->user_end());
-                }
-            } else if (auto *mphi = dyn_cast<MemoryPhi>(back)) {
-                toFindUse.insert(toFindUse.end(), mphi->user_begin(), mphi->user_end());
-            }
-        }
-        if (!find) {
-            // use legacy method, load and store share the same addr
-            auto storePtr = inst->getPointerOperand()->stripPointerCasts();
-            for (auto ni = inst->getNextNonDebugInstruction(); ni; ni = ni->getNextNonDebugInstruction()) {
-                if (auto *loadInst = dyn_cast<LoadInst>(ni)) {
-                    if (loadInst->getPointerOperand()->stripPointerCasts() == storePtr) {
-                        storeNode->addOut(getNode(loadInst));
-                        workList.push_back(loadInst);
-                        find = true;
-                    }
-                }
-            }
-        }
-
-        if (debug && !find) {
-            dbgs() << "Can't find load for ";
-            inst->print(dbgs());
-            dbgs() << '\n';
-            mSSA.print(dbgs());
-        }
-    }
-
-    bool backwardSave(Node *node, std::unordered_map<llvm::Instruction *, Path> &saved) {
-        auto check = saved.find(node->inst);
-        assert(check == saved.end());
-
-        using Stack = std::vector<Node *>;
-        Stack mainStack{node};
-        std::vector<Stack> auxStack{Stack{node->inComing.begin(), node->inComing.end()}};
-        auto end = getNode(root);
-
-        while (!mainStack.empty()) {
-            auto &auxTop = auxStack.back();
-            if (!auxTop.empty()) {
-                auto *n = auxTop.back();
-                auxTop.pop_back();
-                mainStack.push_back(n);
-                auto nAdj = n->inComing;
-                for (auto i: mainStack) {
-                    auto iter = nAdj.find(i);
-                    if (iter != nAdj.end()) {
-                        nAdj.erase(iter);
-                    }
-                }
-                auxStack.emplace_back(nAdj.begin(), nAdj.end());
-            } else {
-                mainStack.pop_back();
-                auxStack.pop_back();
-                continue;
-            }
-            if (mainStack.back() == end) {
-                saved[node->inst] = Path{mainStack};
-            }
-        }
-        return true;
-    }
-
-    static bool extractIntValue(llvm::Value *v, int64_t &ret) {
-        if (auto *ci = dyn_cast<ConstantInt>(v)) {
-            ret = ci->getValue().sextOrTrunc(64).getSExtValue();
-            return true;
-        } else if (auto *ce = dyn_cast<ConstantExpr>(v)) {
-            if (auto *i = dyn_cast<ConstantInt>(ce->getOperand(0))) {
-                ret = i->getValue().sextOrTrunc(64).getSExtValue();
-                return true;
-            }
-        } else if (isa<ConstantPointerNull>(v)) {
-            ret = 0;
-            return true;
-        }
-        return false;
-    }
-
-    static llvm::Value *getCmpConstant(llvm::CmpInst *inst, int64_t &cmpValue) {
-        if (!inst)
-            return nullptr;
-        auto op0 = inst->getOperand(0);
-        auto op1 = inst->getOperand(1);
-        if (extractIntValue(op0, cmpValue))
-            return op0;
-        if (extractIntValue(op1, cmpValue))
-            return op1;
-        return nullptr;
-    }
+  static llvm::Value *getCmpConstant(llvm::CmpInst *inst, int64_t &cmpValue) {
+    if (!inst) return nullptr;
+    auto op0 = inst->getOperand(0);
+    auto op1 = inst->getOperand(1);
+    if (extractIntValue(op0, cmpValue)) return op0;
+    if (extractIntValue(op1, cmpValue)) return op1;
+    return nullptr;
+  }
 
 #define MAX_BLOCK_SIZE 64
 
-    BBVec collectSuccBB(llvm::BasicBlock *bb) {
-        BBVec ret{bb};
-        std::vector<BasicBlock *> work(succ_begin(bb), succ_end(bb));
-        while (!work.empty()) {
-            auto *front = work.front();
-            work.erase(work.begin());
-            if (DT.dominates(bb, front)) {
-                ret.push_back(bb);
-                work.insert(work.end(), succ_end(front), succ_end(front));
-            }
-        }
-        return ret;
+  BBVec collectSuccBB(llvm::BasicBlock *bb) {
+    BBVec                     ret{bb};
+    std::vector<BasicBlock *> work(succ_begin(bb), succ_end(bb));
+    while (!work.empty()) {
+      auto *front = work.front();
+      work.erase(work.begin());
+      if (DT.dominates(bb, front)) {
+        ret.push_back(bb);
+        work.insert(work.end(), succ_end(front), succ_end(front));
+      }
+    }
+    return ret;
+  }
+
+  std::unique_ptr<ErrorHandler> check(Path &p) {
+    auto *callInst = dyn_cast<CallInst>(root);
+    auto  retType = callInst->getCalledFunction()->getReturnType();
+
+    CmpInst     *cmpInst{nullptr};
+    Value       *cmpConstant{nullptr};
+    Instruction *termInst = p.front()->inst;
+
+    if (auto *branchInst = dyn_cast<BranchInst>(termInst)) {
+      cmpInst = dyn_cast<CmpInst>(branchInst->getCondition());
+    } else if (auto *switchInst = dyn_cast<SwitchInst>(termInst)) {
+      cmpInst = dyn_cast<CmpInst>(switchInst->getCondition());
     }
 
-    std::unique_ptr<ErrorHandler> check(Path &p) {
-        auto *callInst = dyn_cast<CallInst>(root);
-        auto retType = callInst->getCalledFunction()->getReturnType();
+    /*
+     * ugly pattern
+     *
+     * if (x == -N)
+     * if (x > 0), if (x > -1)
+     * if (x >= 0)
+     *
+     * if (x != 0)
+     * if (x < 0), if (x < 1)
+     * if (x <= 0)
+     *
+     * if (x == nullptr)
+     * if (!x)
+     *
+     * if (foo(x))
+     */
 
-        CmpInst *cmpInst{nullptr};
-        Value *cmpConstant{nullptr};
-        Instruction *termInst = p.front()->inst;
+    BBVec eh;
 
-        if (auto *branchInst = dyn_cast<BranchInst>(termInst)) {
-            cmpInst = dyn_cast<CmpInst>(branchInst->getCondition());
-        } else if (auto *switchInst = dyn_cast<SwitchInst>(termInst)) {
-            cmpInst = dyn_cast<CmpInst>(switchInst->getCondition());
+    if (cmpInst) {
+      int64_t cmpValue = 0;
+      cmpConstant = getCmpConstant(cmpInst, cmpValue);
+      if (!cmpConstant) return nullptr;
+
+      auto pred = cmpInst->getPredicate();
+      if (retType->isIntegerTy()) {
+        if ((pred == ICmpInst::ICMP_EQ && cmpValue <= 0) ||
+            (pred == ICmpInst::ICMP_SGT &&
+             ((cmpValue == 0) || (cmpValue == -1))) ||
+            (pred == ICmpInst::ICMP_SGE && cmpValue == 0)) {
+          eh = collectSuccBB(termInst->getSuccessor(1));
+        } else if ((pred == ICmpInst::ICMP_NE && cmpValue == 0) ||
+                   (pred == ICmpInst::ICMP_SLT &&
+                    ((cmpValue == 0) || (cmpValue == 1))) ||
+                   (pred == ICmpInst::ICMP_SLE && cmpValue == 0)) {
+          eh = collectSuccBB(termInst->getSuccessor(0));
         }
-
-        /*
-         * ugly pattern
-         *
-         * if (x == -N)
-         * if (x > 0), if (x > -1)
-         * if (x >= 0)
-         *
-         * if (x != 0)
-         * if (x < 0), if (x < 1)
-         * if (x <= 0)
-         *
-         * if (x == nullptr)
-         * if (!x)
-         *
-         * if (foo(x))
-        */
-
-        BBVec eh;
-
-        if (cmpInst) {
-            int64_t cmpValue = 0;
-            cmpConstant = getCmpConstant(cmpInst, cmpValue);
-            if (!cmpConstant)
-                return nullptr;
-
-            auto pred = cmpInst->getPredicate();
-            if (retType->isIntegerTy()) {
-                if ((pred == ICmpInst::ICMP_EQ && cmpValue <= 0) ||
-                    (pred == ICmpInst::ICMP_SGT && ((cmpValue == 0) || (cmpValue == -1))) ||
-                    (pred == ICmpInst::ICMP_SGE && cmpValue == 0)) {
-                    eh = collectSuccBB(termInst->getSuccessor(1));
-                } else if ((pred == ICmpInst::ICMP_NE && cmpValue == 0) ||
-                           (pred == ICmpInst::ICMP_SLT && ((cmpValue == 0) || (cmpValue == 1))) ||
-                           (pred == ICmpInst::ICMP_SLE && cmpValue == 0)) {
-                    eh = collectSuccBB(termInst->getSuccessor(0));
-                }
-            } else if (retType->isPointerTy()) {
-                if (pred == CmpInst::ICMP_EQ && cmpValue == 0) {
-                    eh = collectSuccBB(termInst->getSuccessor(0));
-                } else if (pred == CmpInst::ICMP_NE && cmpValue == 0) {
-                    eh = collectSuccBB(termInst->getSuccessor(1));
-                }
-            }
-        } else {
-            // emmm, it may be wrong
-            eh = collectSuccBB(termInst->getSuccessor(1));
+      } else if (retType->isPointerTy()) {
+        if (pred == CmpInst::ICMP_EQ && cmpValue == 0) {
+          eh = collectSuccBB(termInst->getSuccessor(0));
+        } else if (pred == CmpInst::ICMP_NE && cmpValue == 0) {
+          eh = collectSuccBB(termInst->getSuccessor(1));
         }
-
-        if (eh.empty() || eh.size() > MAX_BLOCK_SIZE)
-            return nullptr;
-
-        return std::make_unique<ErrorHandler>(eh);
+      }
+    } else {
+      // emmm, it may be wrong
+      eh = collectSuccBB(termInst->getSuccessor(1));
     }
 
-    Node *getNode(llvm::Instruction *inst) {
-        auto iter = inst2Node.find(inst);
-        if (iter != inst2Node.end())
-            return iter->second;
-        auto node = new Node(inst);
-        inst2Node[inst] = node;
-        return node;
-    }
+    if (eh.empty() || eh.size() > MAX_BLOCK_SIZE) return nullptr;
 
-public:
-    DataFlowGraph(llvm::Instruction *inst, llvm::MemorySSA &mSSA, llvm::DominatorTree &dt) :
-            root(inst), mSSA(mSSA), DT(dt), workList({inst}) {
-        while (!workList.empty()) {
-            auto *i = workList.back();
-            workList.pop_back();
-            if (elemVisited(i))
-                continue;
-            if (debug) {
-                i->print(dbgs());
-                dbgs() << '\n';
-            }
+    return std::make_unique<ErrorHandler>(eh);
+  }
 
-            auto n = getNode(i);
+  Node *getNode(llvm::Instruction *inst) {
+    auto iter = inst2Node.find(inst);
+    if (iter != inst2Node.end()) return iter->second;
+    auto node = new Node(inst);
+    inst2Node[inst] = node;
+    return node;
+  }
 
-            for (auto u: i->users()) {
-                auto *uInst = dyn_cast<Instruction>(u);
-                if (!uInst || elemVisited(uInst, true))
-                    continue;
-                auto uNode = getNode(uInst);
-                n->addOut(uNode);
+ public:
+  DataFlowGraph(llvm::Instruction *inst, llvm::MemorySSA &mSSA,
+                llvm::DominatorTree &dt)
+      : root(inst), mSSA(mSSA), DT(dt), workList({inst}) {
+    while (!workList.empty()) {
+      auto *i = workList.back();
+      workList.pop_back();
+      if (elemVisited(i)) continue;
+      if (debug) {
+        i->print(dbgs());
+        dbgs() << '\n';
+      }
 
-                if (debug) {
-                    dbgs() << "Child ";
-                    u->print(dbgs());
-                    dbgs() << '\n';
-                }
+      auto n = getNode(i);
 
-                if (auto *storeInst = dyn_cast<StoreInst>(uInst)) {
-                    handleStore(storeInst);
-                } else if (auto *gep = dyn_cast<GEPOperator>(uInst)) {
-                    if (gep->getPointerOperand() != i)
-                        continue;
-                    // need more check
-                    workList.push_back(uInst);
-                } else if (auto *bo = dyn_cast<BinaryOperator>(uInst)) {
-                    if (isa<Constant>(bo->getOperand(0)) || isa<Constant>(bo->getOperand(1)))
-                        workList.push_back(uInst);
-                } else if (auto *brInst = dyn_cast<BranchInst>(uInst)) {
-                    assert(brInst->getCondition() == i);
-                    backwardSave(uNode, checkedList);
-                } else if (auto *switchInst = dyn_cast<SwitchInst>(uInst)) {
-                    assert(switchInst->getCondition() == i);
-                    backwardSave(uNode, checkedList);
-                } else if (isa<CmpInst>(uInst) || isa<LoadInst>(uInst) || isa<PHINode>(uInst) ||
-                           isa<PtrToIntInst>(uInst) ||
-                           isa<CastInst>(uInst) || isa<SelectInst>(uInst)) {
-                    workList.push_back(uInst);
-                }
-            }
+      for (auto u : i->users()) {
+        auto *uInst = dyn_cast<Instruction>(u);
+        if (!uInst || elemVisited(uInst, true)) continue;
+        auto uNode = getNode(uInst);
+        n->addOut(uNode);
+
+        if (debug) {
+          dbgs() << "Child ";
+          u->print(dbgs());
+          dbgs() << '\n';
         }
-    }
 
-    std::unique_ptr<ErrorHandler> Eval() {
-        std::unique_ptr<ErrorHandler> ret;
-        size_t size = std::numeric_limits<size_t>::max();
-        for (auto &pair: checkedList) {
-            auto eh = check(pair.second);
-            // we choose the min eh length here
-            if (eh == nullptr)
-                continue;
-            if (ret == nullptr || eh->data.size() < size) {
-                size = eh->data.size();
-                ret = std::move(eh);
-            }
+        if (auto *storeInst = dyn_cast<StoreInst>(uInst)) {
+          handleStore(storeInst);
+        } else if (auto *gep = dyn_cast<GEPOperator>(uInst)) {
+          if (gep->getPointerOperand() != i) continue;
+          // need more check
+          workList.push_back(uInst);
+        } else if (auto *bo = dyn_cast<BinaryOperator>(uInst)) {
+          if (isa<Constant>(bo->getOperand(0)) ||
+              isa<Constant>(bo->getOperand(1)))
+            workList.push_back(uInst);
+        } else if (auto *brInst = dyn_cast<BranchInst>(uInst)) {
+          assert(brInst->getCondition() == i);
+          backwardSave(uNode, checkedList);
+        } else if (auto *switchInst = dyn_cast<SwitchInst>(uInst)) {
+          assert(switchInst->getCondition() == i);
+          backwardSave(uNode, checkedList);
+        } else if (isa<CmpInst>(uInst) || isa<LoadInst>(uInst) ||
+                   isa<PHINode>(uInst) || isa<PtrToIntInst>(uInst) ||
+                   isa<CastInst>(uInst) || isa<SelectInst>(uInst)) {
+          workList.push_back(uInst);
         }
-        return ret;
+      }
     }
+  }
 
-    ~DataFlowGraph() {
-        for (auto node: nodeSet) {
-            delete node;
-        }
+  std::unique_ptr<ErrorHandler> Eval() {
+    std::unique_ptr<ErrorHandler> ret;
+    size_t                        size = std::numeric_limits<size_t>::max();
+    for (auto &pair : checkedList) {
+      auto eh = check(pair.second);
+      // we choose the min eh length here
+      if (eh == nullptr) continue;
+      if (ret == nullptr || eh->data.size() < size) {
+        size = eh->data.size();
+        ret = std::move(eh);
+      }
     }
+    return ret;
+  }
+
+  ~DataFlowGraph() {
+    for (auto node : nodeSet) {
+      delete node;
+    }
+  }
 };
 
 struct Analyzer : AnalysisInfoMixin<Analyzer> {
+  using Result = std::unordered_map<CallInst *, std::unique_ptr<ErrorHandler>>;
 
-    using Result = std::unordered_map<CallInst *, std::unique_ptr<ErrorHandler>>;
+  Result run(llvm::Function &F, llvm::FunctionAnalysisManager &FAM) {
+    Result ret;
+    for (auto &inst : instructions(F)) {
+      auto *callInst = dyn_cast<CallInst>(&inst);
+      if (!callInst) continue;
+      auto *callee = callInst->getCalledFunction();
+      if (!callee || callee->isIntrinsic() ||
+          !callee->getReturnType()->isIntOrPtrTy() || !callee->hasName())
+        continue;
 
-    Result run(llvm::Function &F, llvm::FunctionAnalysisManager &FAM) {
-        Result ret;
-        for (auto &inst: instructions(F)) {
-            auto *callInst = dyn_cast<CallInst>(&inst);
-            if (!callInst)
-                continue;
-            auto *callee = callInst->getCalledFunction();
-            if (!callee || callee->isIntrinsic() || !callee->getReturnType()->isIntOrPtrTy() || !callee->hasName())
-                continue;
+      if (OnlyLib && !callee->empty()) continue;
 
-            auto cg = std::make_unique<DataFlowGraph>(callInst,
-                                                      FAM.getResult<MemorySSAAnalysis>(F).getMSSA(),
-                                                      FAM.getResult<DominatorTreeAnalysis>(F));
-            ret.emplace(callInst, cg->Eval());
-        }
-        return ret;
+      auto cg = std::make_unique<DataFlowGraph>(
+          callInst, FAM.getResult<MemorySSAAnalysis>(F).getMSSA(),
+          FAM.getResult<DominatorTreeAnalysis>(F));
+      ret.emplace(callInst, cg->Eval());
     }
+    return ret;
+  }
 
-    static bool isRequired() { return true; }
+  static bool isRequired() {
+    return true;
+  }
 
-private:
-    static llvm::AnalysisKey Key;
-    friend struct llvm::AnalysisInfoMixin<Analyzer>;
-
+ private:
+  static llvm::AnalysisKey Key;
+  friend struct llvm::AnalysisInfoMixin<Analyzer>;
 };
 
 AnalysisKey Analyzer::Key;
 
-static cl::OptionCategory DefaultCat("default category");
-static cl::list<std::string> InputFiles(cl::Positional, cl::ZeroOrMore, cl::desc("<input file(s)>"),
-                                        cl::cat(DefaultCat));
-static cl::opt<std::string> InputList("list", cl::Optional, cl::desc("<list file>"), cl::cat(DefaultCat));
-
-static cl::opt<std::string> ErrFile("errs", cl::Optional, cl::init("-"), cl::desc("<output errs file>"),
-                                    cl::cat(DefaultCat));
-
-
 static void ReadLists(const std::string &list, std::vector<std::string> &out) {
-    std::ifstream f(list);
-    std::string line;
-    if (f.is_open()) {
-        while (std::getline(f, line)) {
-            out.push_back(line);
-        }
+  std::ifstream f(list);
+  std::string   line;
+  if (f.is_open()) {
+    while (std::getline(f, line)) {
+      out.push_back(line);
     }
+  }
 }
 
 class Runner {
-    LoopAnalysisManager LAM;
+  std::vector<std::unique_ptr<Module>> modules;
+  ThreadPool                           pool;
+
+  std::mutex                                mu;
+  std::unordered_map<std::string, uint32_t> checked, unchecked;
+  std::unordered_map<std::string, std::vector<std::unique_ptr<ErrorHandler>>>
+      ehs;
+  // sort by checked percentage.
+  std::vector<std::pair<std::string, double>> errFuncs;
+
+  void runOnModule(Module *M) {
+    LoopAnalysisManager     LAM;
     FunctionAnalysisManager FAM;
-    CGSCCAnalysisManager CGAM;
-    ModuleAnalysisManager MAM;
-    ModulePassManager MPM;
+    CGSCCAnalysisManager    CGAM;
+    ModuleAnalysisManager   MAM;
+
+    FAM.registerPass([] { return Analyzer(); });
+
     PassBuilder PB;
-    LLVMContext Ctx;
+    PB.registerModuleAnalyses(MAM);
+    PB.registerCGSCCAnalyses(CGAM);
+    PB.registerFunctionAnalyses(FAM);
+    PB.registerLoopAnalyses(LAM);
+    PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
+    ModulePassManager MPM =
+        PB.buildPerModuleDefaultPipeline(OptimizationLevel::O2);
 
-    std::vector<std::unique_ptr<Module>> modules;
-    ThreadPool pool;
+    MPM.run(*M, MAM);
 
-    std::mutex mu;
-    std::unordered_map<std::string, uint32_t> checked, unchecked;
-    std::unordered_map<std::string, std::vector<std::unique_ptr<ErrorHandler>>> ehs;
-    // sort by checked percentage.
-    std::vector<std::pair<std::string, double>> errFuncs;
-
-    void runOnFunction(Function *F) {
-        // may be cost
-        auto &res = FAM.getResult<Analyzer>(*F);
-
-        std::lock_guard<std::mutex> guard(mu);
-        for (auto &pair: res) {
-            auto *callee = dyn_cast<Function>(pair.first->getCalledOperand()->stripPointerCasts());
-            if (!callee || !callee->hasName())
-                continue;
-            auto fn = callee->getName().str();
-            if (pair.second != nullptr) {
-                checked[fn] += 1;
-                ehs[fn].emplace_back(std::move(pair.second));
-            } else {
-                unchecked[fn] += 1;
-            }
-        }
+    for (auto &F : *M) {
+      if (F.isIntrinsic() || F.empty()) continue;
+      runOnFunction(&F, FAM);
     }
+  }
 
-public:
-    explicit Runner(int i) : pool(i) {
-        FAM.registerPass([] { return Analyzer(); });
+  void runOnFunction(Function *F, FunctionAnalysisManager &FAM) {
+    // may be cost
+    auto &res = FAM.getResult<Analyzer>(*F);
 
-        PB.registerModuleAnalyses(MAM);
-        PB.registerCGSCCAnalyses(CGAM);
-        PB.registerFunctionAnalyses(FAM);
-        PB.registerLoopAnalyses(LAM);
-        PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
-        MPM = PB.buildO0DefaultPipeline(OptimizationLevel::O0);
+    std::lock_guard<std::mutex> guard(mu);
+    for (auto &pair : res) {
+      auto *callee = dyn_cast<Function>(
+          pair.first->getCalledOperand()->stripPointerCasts());
+      if (!callee || !callee->hasName()) continue;
+      auto fn = callee->getName().str();
+      if (pair.second != nullptr) {
+        checked[fn] += 1;
+        ehs[fn].emplace_back(std::move(pair.second));
+      } else {
+        unchecked[fn] += 1;
+      }
     }
+  }
 
-    bool loadFile(const std::string &file) {
-        SMDiagnostic Err;
-        auto M = parseIRFile(file, Err, Ctx);
-        if (!M) {
-            Err.print("analyzer", dbgs());
-            return false;
-        }
-        MPM.run(*M, MAM);
-        dbgs() << "Load " << file << '\n';
-        modules.emplace_back(std::move(M));
-        return true;
+ public:
+  explicit Runner(int i) : pool(i) {
+  }
+
+  bool loadFile(const std::string &file) {
+    SMDiagnostic Err;
+    auto        *Ctx = new LLVMContext();
+    auto         M = parseIRFile(file, Err, *Ctx);
+    if (!M) {
+      Err.print("analyzer", dbgs());
+      return false;
     }
+    dbgs() << "Load " << file << '\n';
+    modules.emplace_back(std::move(M));
+    return true;
+  }
 
-    void loadFiles(ArrayRef<std::string> files) {
-        int counter = 0;
-        for (auto &file: files) {
-            if (loadFile(file))
-                counter++;
-        }
-        dbgs() << "parse " << counter << " files\n";
+  void loadFiles(ArrayRef<std::string> files) {
+    int counter = 0;
+    for (auto &file : files) {
+      if (loadFile(file)) counter++;
     }
+    dbgs() << "parse " << counter << " files\n";
+  }
 
-    void execute() {
-        for (auto &m: modules) {
-            for (auto &F: *m) {
-                if (F.isIntrinsic() || F.empty())
-                    continue;
-                auto *Fptr = &F;
-                pool.enqueue([this, Fptr] { this->runOnFunction(Fptr); });
-            }
-        }
-        pool.wait();
-
-        // calc
-        for (auto &pair: checked) {
-            auto c = pair.second;
-            auto uc = unchecked[pair.first];
-            double v = (1.0f * c) / (1.0f * (c + uc));
-            errFuncs.emplace_back(pair.first, v);
-        }
-        using elem = decltype(errFuncs)::value_type;
-        std::sort(errFuncs.begin(), errFuncs.end(), [](const elem &a, const elem &b) { return a.second > b.second; });
+  void execute() {
+    for (auto &m : modules) {
+      auto *ptr = m.get();
+      pool.enqueue([this, ptr] { return this->runOnModule(ptr); });
     }
+    pool.wait();
 
-    void dump(llvm::raw_ostream &OS) {
-        char buf[16];
-        for (auto &pair: errFuncs) {
-            OS << pair.first << ','
-               << checked[pair.first] << ','
-               << unchecked[pair.first] << ',';
-            auto n = snprintf(buf, sizeof(buf), "%0.3lf", pair.second);
-            buf[n] = '\0';
-            OS << buf << '\n';
-        }
+    // calc
+    for (auto &pair : checked) {
+      auto   c = pair.second;
+      auto   uc = unchecked[pair.first];
+      double v = (1.0f * c) / (1.0f * (c + uc));
+      errFuncs.emplace_back(pair.first, v);
     }
+    using elem = decltype(errFuncs)::value_type;
+    std::sort(errFuncs.begin(), errFuncs.end(),
+              [](const elem &a, const elem &b) { return a.second > b.second; });
+  }
 
-    ~Runner() {
-        pool.join();
+  void dump(llvm::raw_ostream &OS) {
+    char buf[16];
+    for (auto &pair : errFuncs) {
+      OS << pair.first << ',' << checked[pair.first] << ','
+         << unchecked[pair.first] << ',';
+      auto n = snprintf(buf, sizeof(buf), "%0.3lf", pair.second);
+      buf[n] = '\0';
+      OS << buf << '\n';
     }
+  }
+
+  ~Runner() {
+    pool.join();
+  }
 };
 
 int main(int argc, char *argv[]) {
-    cl::HideUnrelatedOptions(DefaultCat);
-    cl::ParseCommandLineOptions(argc, argv);
+  cl::HideUnrelatedOptions(DefaultCat);
+  cl::ParseCommandLineOptions(argc, argv);
 
-    std::vector<std::string> files(InputFiles);
-    if (!InputList.empty())
-        ReadLists(InputList, files);
+  std::vector<std::string> files(InputFiles);
+  if (!InputList.empty()) ReadLists(InputList, files);
 
-    auto runner = std::make_unique<Runner>(std::thread::hardware_concurrency());
-    runner->loadFiles(files);
-    runner->execute();
-    std::error_code EC;
-    raw_fd_ostream out(ErrFile, EC);
-    runner->dump(out);
+  auto runner = std::make_unique<Runner>(std::thread::hardware_concurrency());
+  runner->loadFiles(files);
+  runner->execute();
+  std::error_code EC;
+  raw_fd_ostream  out(ErrFile, EC);
+  runner->dump(out);
 }
