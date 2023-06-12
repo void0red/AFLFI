@@ -602,6 +602,9 @@ unsigned long long int calculateCollisions(uint32_t edges) {
 
 #include <llvm/IR/InstIterator.h>
 #include <llvm/Transforms/Utils/BasicBlockUtils.h>
+#include <llvm/IR/DebugInfo.h>
+#include <llvm/IR/DebugLoc.h>
+
 llvm::Instruction *InstPlugin::setNoSanitize(llvm::Instruction *v) {
   v->setMetadata(noSanitizeKindId, noSanitizeNode);
   return v;
@@ -631,6 +634,23 @@ static std::vector<const char *> blackList{
     "strncmp", "strncpy",     "strnlen",    "strnstr", "strpbrk",
     "strrchr", "strscpy",     "strsep",     "strspn",  "strst"};
 
+hash_code InstPlugin::getLocHash(llvm::CallInst *callInst) {
+  if (DILocation *Loc = callInst->getDebugLoc()) {
+    StringRef Dir = Loc->getDirectory();
+    StringRef File = Loc->getFilename();
+    unsigned  Line = Loc->getLine();
+    return llvm::hash_combine(llvm::hash_value(Dir), llvm::hash_value(File),
+                              llvm::hash_value(Line));
+  }
+  auto *Func = callInst->getParent();
+  auto *Callee = callInst->getCalledFunction();
+  if (Func && Func->hasName() && Callee && Callee->hasName()) {
+    return llvm::hash_combine(llvm::hash_value(Func->getName()),
+                              llvm::hash_value(Callee->getName()));
+  }
+  // we just hash the ptr to avoid collide
+  return llvm::hash_value(callInst);
+}
 
 void InstPlugin::CollectInsertPoint(llvm::Module *m) {
   for (auto &func : m->functions()) {
@@ -650,7 +670,7 @@ void InstPlugin::CollectInsertPoint(llvm::Module *m) {
       if (std::any_of(blackList.begin(), blackList.end(),
                       [=](const char *prefix) { return fn == prefix; }))
         continue;
-      if (errorFuncs.find(fn) != errorFuncs.end()) {
+      if (errorLocs.count(getLocHash(callInst))) {
         errorSite[callInst] = counter++;
       }
     }
@@ -699,7 +719,12 @@ bool InstPlugin::loadErrFunc(const char *name) {
   std::string buf;
   while (std::getline(f, buf)) {
     StringRef bufp(buf);
-    errorFuncs.insert(bufp.trim().str());
+    if (bufp.startswith("#")) continue;
+    auto idx = bufp.find(',');
+    if (idx != StringRef::npos) bufp = bufp.substr(0, idx);
+    unsigned long long v = 0;
+    if (getAsUnsignedInteger(bufp.trim(), 10, v)) continue;
+    errorLocs.insert({v});
   }
   return true;
 }

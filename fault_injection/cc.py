@@ -2,8 +2,8 @@
 import sys
 import os
 import subprocess
-from pathlib import Path
 import logging
+
 
 def get_bc_name(old, link=False):
     if old.endswith('.o'):
@@ -11,6 +11,7 @@ def get_bc_name(old, link=False):
     if link:
         return old + '.link.bc'
     return old + '.bc'
+
 
 def check_args(l: list):
     logging.debug('recv: ' + ' '.join(l))
@@ -28,17 +29,16 @@ def check_args(l: list):
         # it will read from stdin as input later, so we skip it
         return fixed_args
 
-    multi_objs = [v for i,v in enumerate(l) if v.endswith('.o') and i != outfile_idx]
+    multi_objs = [v for i, v in enumerate(l) if v.endswith('.o') and i != outfile_idx]
 
     if len(multi_objs) > 0:
         link_mode = True
-
 
     if compile_mode:
         if outfile_idx > 0:
             tmp_args = ['clang', '-emit-llvm', '-g'] + l[1:outfile_idx] + [get_bc_name(l[outfile_idx])]
             if outfile_idx + 1 < len(l):
-                tmp_args += l[outfile_idx+1:]
+                tmp_args += l[outfile_idx + 1:]
             logging.debug(' '.join(tmp_args))
             try:
                 subprocess.run(tmp_args, env=os.environ, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -58,6 +58,7 @@ def check_args(l: list):
             # we can't guess the output name
             pass
     return fixed_args
+
 
 if __name__ == '__main__':
     if os.environ.get('HOOK_DEBUG'):

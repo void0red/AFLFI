@@ -29,8 +29,7 @@ ENV NO_ARCH_OPT=1
 ENV IS_DOCKER=1
 
 RUN apt-get update && apt-get full-upgrade -y && \
-    apt-get install -y --no-install-recommends wget ca-certificates apt-utils && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get install -y --no-install-recommends wget ca-certificates apt-utils
 
 RUN echo "deb [signed-by=/etc/apt/keyrings/llvm-snapshot.gpg.key] http://apt.llvm.org/jammy/ llvm-toolchain-jammy-${LLVM_VERSION} main" > /etc/apt/sources.list.d/llvm.list && \
     wget -qO /etc/apt/keyrings/llvm-snapshot.gpg.key https://apt.llvm.org/llvm-snapshot.gpg.key
@@ -54,8 +53,8 @@ RUN apt-get update && \
     lld-${LLVM_VERSION} lldb-${LLVM_VERSION} llvm-${LLVM_VERSION} \
     llvm-${LLVM_VERSION}-dev llvm-${LLVM_VERSION}-runtime llvm-${LLVM_VERSION}-tools \
     $([ "$(dpkg --print-architecture)" = "amd64" ] && echo gcc-${GCC_VERSION}-multilib gcc-multilib) \
-    $([ "$(dpkg --print-architecture)" = "arm64" ] && echo libcapstone-dev) && \
-    rm -rf /var/lib/apt/lists/*
+    $([ "$(dpkg --print-architecture)" = "arm64" ] && echo libcapstone-dev) \
+    fdfind riggrep
     # gcc-multilib is only used for -m32 support on x86
     # libcapstone-dev is used for coresight_mode on arm64
 
@@ -95,4 +94,6 @@ RUN make clean && make -j
 RUN echo "set encoding=utf-8" > /root/.vimrc && \
     echo ". /etc/bash_completion" >> ~/.bashrc && \
     echo 'alias joe="joe --wordwrap --joe_state -nobackup"' >> ~/.bashrc && \
-    echo "export PS1='"'[AFLFI \h] \w \$ '"'" >> ~/.bashrc
+    echo "export PS1='"'[AFLFI \h] \w \$ '"'" >> ~/.bashrc && \
+    echo "alias bat=batcat" >> ~/.bashrc && \
+    echo "alias fd=fdfind" >> ~/.bashrc

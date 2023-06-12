@@ -70,6 +70,7 @@ IS_EXTERN int be_quiet;
 #include <unordered_map>
 #include <unordered_set>
 #include <llvm/Passes/PassBuilder.h>
+#include <llvm/ADT/SmallSet.h>
 class InstPlugin {
  private:
   const char *FaultInjectionControlName = "__fault_injection_control";
@@ -82,7 +83,7 @@ class InstPlugin {
   llvm::MDNode      *noSanitizeNode{nullptr};
   llvm::Instruction *setNoSanitize(llvm::Instruction *v);
 
-  std::unordered_set<std::string>           errorFuncs;
+  llvm::SmallSet<llvm::hash_code, 16>           errorLocs;
   std::unordered_map<std::string, unsigned> distance;
   bool                                      loadErrFunc(const char *name);
   bool                                      loadDistance(const char *name);
@@ -94,6 +95,8 @@ class InstPlugin {
   void InsertControl(llvm::Module *m);
 
   void InsertDistance(llvm::Module *m);
+
+  static llvm::hash_code getLocHash(llvm::CallInst* callInst);
 
  public:
   void runOnModule(llvm::Module &M);

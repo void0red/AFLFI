@@ -2,18 +2,103 @@
 // Created by void0red on 23-6-6.
 //
 #include <llvm/Analysis/MemorySSA.h>
+#include <llvm/IR/DebugInfo.h>
+#include <llvm/IR/DebugLoc.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IRReader/IRReader.h>
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Passes/PassPlugin.h>
 #include <llvm/Support/CommandLine.h>
+#include <array>
+#include <condition_variable>
 #include <fstream>
+#include <functional>
+#include <future>
+#include <memory>
+#include <mutex>
+#include <queue>
 #include <sstream>
+#include <stdexcept>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include "threadpool.h"
+
+class ThreadPool {
+ public:
+  ThreadPool(size_t threads) : stop(false) {
+    for (size_t i = 0; i < threads; ++i)
+      workers.emplace_back([this] {
+        for (;;) {
+          std::function<void()> task;
+
+          {
+            std::unique_lock<std::mutex> lock(this->queue_mutex);
+            this->condition.wait(
+                lock, [this] { return this->stop || !this->tasks.empty(); });
+            if (this->stop && this->tasks.empty()) return;
+            task = std::move(this->tasks.front());
+            this->tasks.pop();
+          }
+
+          task();
+          task_size.fetch_sub(1);
+          done.notify_one();
+        }
+      });
+  }
+
+  template <class F, class... Args>
+  auto enqueue(F &&f, Args &&...args)
+      -> std::future<typename std::result_of<F(Args...)>::type> {
+    using return_type = typename std::result_of<F(Args...)>::type;
+
+    auto task = std::make_shared<std::packaged_task<return_type()>>(
+        std::bind(std::forward<F>(f), std::forward<Args>(args)...));
+
+    std::future<return_type> res = task->get_future();
+    {
+      std::unique_lock<std::mutex> lock(queue_mutex);
+
+      // don't allow enqueueing after stopping the pool
+      if (stop) throw std::runtime_error("enqueue on stopped ThreadPool");
+
+      tasks.emplace([task]() { (*task)(); });
+      task_size.fetch_add(1);
+    }
+    condition.notify_one();
+    return res;
+  }
+
+  void join() {
+    {
+      std::unique_lock<std::mutex> lock(queue_mutex);
+      stop = true;
+    }
+    condition.notify_all();
+    for (std::thread &worker : workers)
+      worker.join();
+  }
+
+  void wait() {
+    std::unique_lock<std::mutex> lock(queue_mutex);
+    done.wait(lock, [this] { return task_size == 0; });
+  }
+
+ private:
+  // need to keep track of threads so we can join them
+  std::vector<std::thread> workers;
+  // the task queue
+  std::queue<std::function<void()>> tasks;
+
+  // synchronization
+  std::mutex              queue_mutex;
+  std::condition_variable condition;
+  bool                    stop;
+  std::atomic<uint32_t>   task_size;
+  std::condition_variable done;
+};
 
 using namespace llvm;
 
@@ -32,16 +117,64 @@ static cl::opt<std::string> ErrFile("errs", cl::Optional, cl::init("-"),
 static cl::opt<bool> OnlyLib("onlylib", cl::desc("only focus on lib function"),
                              cl::cat(DefaultCat));
 
-struct ErrorHandler {
-  std::vector<hash_code> data;
+static cl::opt<bool> hDebug("debug", cl::cat(DefaultCat), cl::Hidden);
 
-  explicit ErrorHandler(ArrayRef<BasicBlock *> BBs) {
+struct ErrorHandler {
+  CallInst              *callInst;
+  std::vector<hash_code> data;
+  bool                   checked{false};
+
+  explicit ErrorHandler(CallInst *callInst) : callInst(callInst) {
+  }
+
+  ErrorHandler(CallInst *callInst, ArrayRef<BasicBlock *> BBs)
+      : callInst(callInst) {
+    setEH(BBs);
+  }
+
+  void setEH(ArrayRef<BasicBlock *> BBs) {
+    if (BBs.empty()) return;
     for (auto *bb : BBs) {
       for (auto &inst : *bb) {
         if (isa<IntrinsicInst>(&inst)) continue;
         data.emplace_back(getHash(inst));
       }
     }
+    checked = true;
+  }
+
+  hash_code getLocHash() {
+    if (DILocation *Loc = callInst->getDebugLoc()) {
+      StringRef Dir = Loc->getDirectory();
+      StringRef File = Loc->getFilename();
+      unsigned  Line = Loc->getLine();
+      return llvm::hash_combine(llvm::hash_value(Dir), llvm::hash_value(File),
+                                llvm::hash_value(Line));
+    }
+    auto *Func = callInst->getParent();
+    auto *Callee = callInst->getCalledFunction();
+    if (Func && Func->hasName() && Callee && Callee->hasName()) {
+      return llvm::hash_combine(llvm::hash_value(Func->getName()),
+                                llvm::hash_value(Callee->getName()));
+    }
+    // we just hash the ptr to avoid collide
+    return llvm::hash_value(callInst);
+  }
+
+  double similarity(ErrorHandler *other) {
+    if (this == other) return 0;
+
+    auto size1 = this->data.size();
+    auto size2 = other->data.size();
+
+    if (size1 == 0 && size2 == 0) return 1;
+
+    if (size1 == 0 || size2 == 0) return 0;
+
+    auto   ed = edit_distance(this->data, other->data);
+    double value = 1 - (ed * 1.0) / std::max(size1, size2);
+
+    return value;
   }
 
  private:
@@ -70,6 +203,27 @@ struct ErrorHandler {
     return llvm::hash_combine(
         llvm::hash_value(Inst.getOpcode()), llvm::hash_value(Inst.getType()),
         llvm::hash_combine_range(OperTypes.begin(), OperTypes.end()));
+  }
+
+  static unsigned edit_distance(ArrayRef<hash_code> a, ArrayRef<hash_code> b) {
+    int      pos1 = a.size();
+    int      pos2 = b.size();
+    unsigned dp[pos1 + 1][pos2 + 1];
+
+    for (int i = 0; i <= pos1; ++i) {
+      dp[i][0] = i;
+    }
+    for (int i = 0; i <= pos2; ++i) {
+      dp[0][i] = i;
+    }
+    for (int i = 1; i <= pos1; ++i) {
+      for (int j = 1; j <= pos2; ++j) {
+        dp[i][j] = std::min(dp[i - 1][j] + 1, dp[i][j - 1] + 1);
+        dp[i][j] =
+            std::min(dp[i][j], dp[i - 1][j - 1] + (a[i - 1] != b[j - 1]));
+      }
+    }
+    return dp[pos1][pos2];
   }
 };
 
@@ -100,8 +254,7 @@ class DataFlowGraph {
   using Path = std::vector<Node *>;
   using BBVec = std::vector<BasicBlock *>;
 
-  std::unordered_map<llvm::Instruction *, Path> checkedList;
-  bool                                          debug{false};
+  std::vector<Path> checkedPath;
 
   bool elemVisited(llvm::Value *elem, bool noInsert = false) {
     if (visited.find(elem) == visited.end()) {
@@ -142,7 +295,7 @@ class DataFlowGraph {
           find = true;
         }
       } else if (auto *md = dyn_cast<MemoryDef>(back)) {
-        if (debug) {
+        if (hDebug) {
           dbgs() << "MemoryDef :";
           md->getMemoryInst()->print(dbgs());
           dbgs() << '\n';
@@ -169,19 +322,14 @@ class DataFlowGraph {
       }
     }
 
-    if (debug && !find) {
+    if (hDebug && !find) {
       dbgs() << "Can't find load for ";
       inst->print(dbgs());
       dbgs() << '\n';
-      mSSA.print(dbgs());
     }
   }
 
-  bool backwardSave(Node                                          *node,
-                    std::unordered_map<llvm::Instruction *, Path> &saved) {
-    auto check = saved.find(node->inst);
-    assert(check == saved.end());
-
+  bool backwardSave(Node *node, std::vector<Path> &saved) {
     using Stack = std::vector<Node *>;
     Stack              mainStack{node};
     std::vector<Stack> auxStack{
@@ -205,7 +353,7 @@ class DataFlowGraph {
         auxStack.pop_back();
         continue;
       }
-      if (mainStack.back() == end) { saved[node->inst] = Path{mainStack}; }
+      if (mainStack.back() == end) { saved.emplace_back(Path{mainStack}); }
     }
     return true;
   }
@@ -253,6 +401,7 @@ class DataFlowGraph {
 
   std::unique_ptr<ErrorHandler> check(Path &p) {
     auto *callInst = dyn_cast<CallInst>(root);
+    auto  ret = std::make_unique<ErrorHandler>(callInst);
     auto  retType = callInst->getCalledFunction()->getReturnType();
 
     CmpInst     *cmpInst{nullptr};
@@ -287,7 +436,7 @@ class DataFlowGraph {
     if (cmpInst) {
       int64_t cmpValue = 0;
       cmpConstant = getCmpConstant(cmpInst, cmpValue);
-      if (!cmpConstant) return nullptr;
+      if (!cmpConstant) return ret;
 
       auto pred = cmpInst->getPredicate();
       if (retType->isIntegerTy()) {
@@ -314,9 +463,10 @@ class DataFlowGraph {
       eh = collectSuccBB(termInst->getSuccessor(1));
     }
 
-    if (eh.empty() || eh.size() > MAX_BLOCK_SIZE) return nullptr;
+    if (eh.empty() || eh.size() > MAX_BLOCK_SIZE) return ret;
 
-    return std::make_unique<ErrorHandler>(eh);
+    ret->setEH(eh);
+    return ret;
   }
 
   Node *getNode(llvm::Instruction *inst) {
@@ -335,7 +485,7 @@ class DataFlowGraph {
       auto *i = workList.back();
       workList.pop_back();
       if (elemVisited(i)) continue;
-      if (debug) {
+      if (hDebug) {
         i->print(dbgs());
         dbgs() << '\n';
       }
@@ -348,7 +498,7 @@ class DataFlowGraph {
         auto uNode = getNode(uInst);
         n->addOut(uNode);
 
-        if (debug) {
+        if (hDebug) {
           dbgs() << "Child ";
           u->print(dbgs());
           dbgs() << '\n';
@@ -366,10 +516,10 @@ class DataFlowGraph {
             workList.push_back(uInst);
         } else if (auto *brInst = dyn_cast<BranchInst>(uInst)) {
           assert(brInst->getCondition() == i);
-          backwardSave(uNode, checkedList);
+          backwardSave(uNode, checkedPath);
         } else if (auto *switchInst = dyn_cast<SwitchInst>(uInst)) {
           assert(switchInst->getCondition() == i);
-          backwardSave(uNode, checkedList);
+          backwardSave(uNode, checkedPath);
         } else if (isa<CmpInst>(uInst) || isa<LoadInst>(uInst) ||
                    isa<PHINode>(uInst) || isa<PtrToIntInst>(uInst) ||
                    isa<CastInst>(uInst) || isa<SelectInst>(uInst)) {
@@ -379,19 +529,23 @@ class DataFlowGraph {
     }
   }
 
-  std::unique_ptr<ErrorHandler> Eval() {
-    std::unique_ptr<ErrorHandler> ret;
-    size_t                        size = std::numeric_limits<size_t>::max();
-    for (auto &pair : checkedList) {
-      auto eh = check(pair.second);
-      // we choose the min eh length here
-      if (eh == nullptr) continue;
-      if (ret == nullptr || eh->data.size() < size) {
+  ErrorHandler *Eval() {
+    auto   ret = std::make_unique<ErrorHandler>(dyn_cast<CallInst>(root));
+    size_t size = std::numeric_limits<size_t>::max();
+    if (hDebug) {
+      dbgs() << "Find " << checkedPath.size() << " paths: ";
+      root->print(dbgs());
+      dbgs() << '\n';
+    }
+    for (auto &p : checkedPath) {
+      auto &&eh = check(p);
+      if ((!ret->checked && eh->checked) ||
+          (ret->checked && eh->checked && eh->data.size() < size)) {
         size = eh->data.size();
-        ret = std::move(eh);
+        ret.swap(eh);
       }
     }
-    return ret;
+    return ret.release();
   }
 
   ~DataFlowGraph() {
@@ -402,7 +556,7 @@ class DataFlowGraph {
 };
 
 struct Analyzer : AnalysisInfoMixin<Analyzer> {
-  using Result = std::unordered_map<CallInst *, std::unique_ptr<ErrorHandler>>;
+  using Result = std::vector<ErrorHandler *>;
 
   Result run(llvm::Function &F, llvm::FunctionAnalysisManager &FAM) {
     Result ret;
@@ -419,7 +573,7 @@ struct Analyzer : AnalysisInfoMixin<Analyzer> {
       auto cg = std::make_unique<DataFlowGraph>(
           callInst, FAM.getResult<MemorySSAAnalysis>(F).getMSSA(),
           FAM.getResult<DominatorTreeAnalysis>(F));
-      ret.emplace(callInst, cg->Eval());
+      ret.push_back(cg->Eval());
     }
     return ret;
   }
@@ -449,12 +603,14 @@ class Runner {
   std::vector<std::unique_ptr<Module>> modules;
   ThreadPool                           pool;
 
-  std::mutex                                mu;
-  std::unordered_map<std::string, uint32_t> checked, unchecked;
-  std::unordered_map<std::string, std::vector<std::unique_ptr<ErrorHandler>>>
-      ehs;
-  // sort by checked percentage.
+  std::mutex                                                   mu;
+  std::unordered_map<std::string, std::vector<ErrorHandler *>> checked,
+      unchecked;
+  std::unordered_set<std::string> definedFuncs;
+  // sort by checked percentage
   std::vector<std::pair<std::string, double>> errFuncs;
+  // sort by similarity
+  std::unordered_map<ErrorHandler *, double> sims;
 
   void runOnModule(Module *M) {
     LoopAnalysisManager     LAM;
@@ -477,6 +633,10 @@ class Runner {
 
     for (auto &F : *M) {
       if (F.isIntrinsic() || F.empty()) continue;
+      if (F.hasName()) {
+        std::lock_guard<std::mutex> guard(mu);
+        definedFuncs.insert(F.getName().str());
+      }
       runOnFunction(&F, FAM);
     }
   }
@@ -486,17 +646,31 @@ class Runner {
     auto &res = FAM.getResult<Analyzer>(*F);
 
     std::lock_guard<std::mutex> guard(mu);
-    for (auto &pair : res) {
-      auto *callee = dyn_cast<Function>(
-          pair.first->getCalledOperand()->stripPointerCasts());
+    for (auto *eh : res) {
+      auto *callee = eh->callInst->getCalledFunction();
       if (!callee || !callee->hasName()) continue;
       auto fn = callee->getName().str();
-      if (pair.second != nullptr) {
-        checked[fn] += 1;
-        ehs[fn].emplace_back(std::move(pair.second));
+      if (eh->checked) {
+        checked[fn].push_back(eh);
       } else {
-        unchecked[fn] += 1;
+        unchecked[fn].push_back(eh);
       }
+    }
+  }
+
+  void calcSimilarity(ArrayRef<ErrorHandler *> callee) {
+    int                 size = callee.size();
+    std::vector<double> sim(size, 0);
+    for (int i = 0; i < size; ++i) {
+      for (int j = i + 1; j < size; ++j) {
+        auto v = callee[i]->similarity(callee[j]);
+        sim[i] += v;
+        sim[j] += v;
+      }
+    }
+    std::lock_guard<std::mutex> guard(mu);
+    for (int i = 0; i < size; ++i) {
+      sims[callee[i]] = sim[i] / size;
     }
   }
 
@@ -528,30 +702,45 @@ class Runner {
   void execute() {
     for (auto &m : modules) {
       auto *ptr = m.get();
-      pool.enqueue([this, ptr] { return this->runOnModule(ptr); });
+      pool.enqueue([this, ptr] { this->runOnModule(ptr); });
     }
     pool.wait();
 
-    // calc
+    // calc checked percentage
     for (auto &pair : checked) {
-      auto   c = pair.second;
-      auto   uc = unchecked[pair.first];
+      if (OnlyLib && definedFuncs.find(pair.first) != definedFuncs.end())
+        continue;
+      auto   c = pair.second.size();
+      auto   uc = unchecked[pair.first].size();
       double v = (1.0f * c) / (1.0f * (c + uc));
       errFuncs.emplace_back(pair.first, v);
+
+      auto &ehs = pair.second;
+      pool.enqueue([this, ehs] { this->calcSimilarity(ehs); });
     }
+
     using elem = decltype(errFuncs)::value_type;
     std::sort(errFuncs.begin(), errFuncs.end(),
               [](const elem &a, const elem &b) { return a.second > b.second; });
+
+    // calc similarity
+    pool.wait();
   }
 
   void dump(llvm::raw_ostream &OS) {
     char buf[16];
     for (auto &pair : errFuncs) {
-      OS << pair.first << ',' << checked[pair.first] << ','
-         << unchecked[pair.first] << ',';
-      auto n = snprintf(buf, sizeof(buf), "%0.3lf", pair.second);
-      buf[n] = '\0';
+      OS << "# " << pair.first << ',' << checked[pair.first].size() << ','
+         << unchecked[pair.first].size() << ',';
+      snprintf(buf, sizeof(buf), "%0.3lf", pair.second);
       OS << buf << '\n';
+      for (auto eh : unchecked[pair.first]) {
+        OS << eh->getLocHash() << '\n';
+      }
+      for (auto eh : checked[pair.first]) {
+        snprintf(buf, sizeof(buf), "%0.3lf", sims[eh]);
+        OS << eh->getLocHash() << ',' << buf << '\n';
+      }
     }
   }
 

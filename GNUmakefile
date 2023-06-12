@@ -341,7 +341,7 @@ fault.o:
 	-$(CXX) -c -O2 -g fault_injection/fault.cpp -Iinclude -o fault.o
 
 fault-analyzer:
-	@cmake -S fault_injection/analyzer -B fault_injection/build
+	@cmake -S fault_injection -B fault_injection/build
 	@cmake --build fault_injection/build
 
 .PHONY: gcc_plugin
