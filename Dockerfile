@@ -54,7 +54,7 @@ RUN apt-get update && \
     llvm-${LLVM_VERSION}-dev llvm-${LLVM_VERSION}-runtime llvm-${LLVM_VERSION}-tools \
     $([ "$(dpkg --print-architecture)" = "amd64" ] && echo gcc-${GCC_VERSION}-multilib gcc-multilib) \
     $([ "$(dpkg --print-architecture)" = "arm64" ] && echo libcapstone-dev) \
-    fd-find ripgrep
+    fd-find ripgrep bat
     # gcc-multilib is only used for -m32 support on x86
     # libcapstone-dev is used for coresight_mode on arm64
 
