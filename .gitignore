@@ -106,4 +106,4 @@ utils/persistent_mode/test-instr
 utils/plot_ui/afl-plot-ui
 vuln_prog
 **/.idea
-**/*build*
+fault_injection/build
