@@ -611,6 +611,10 @@ llvm::Instruction *InstPlugin::setNoSanitize(llvm::Instruction *v) {
 }
 
 void InstPlugin::runOnModule(llvm::Module &M) {
+  loadErrFunc(getenv("FJ_ERR"));
+  loadDistance(getenv("FJ_DIS"));
+  if (errorLocs.empty()) return;
+
   IRBuilder<> IRB(M.getContext());
   FaultInjectionControlFunc = M.getOrInsertFunction(
       FaultInjectionControlName, IRB.getInt1Ty(), IRB.getVoidTy());
@@ -618,9 +622,6 @@ void InstPlugin::runOnModule(llvm::Module &M) {
       FaultInjectionDistanceName, IRB.getVoidTy(), IRB.getInt32Ty());
   noSanitizeKindId = M.getMDKindID("nosanitize");
   noSanitizeNode = MDNode::get(M.getContext(), None);
-
-  loadErrFunc(getenv("FJ_ERR"));
-  loadDistance(getenv("FJ_DIS"));
 
   CollectInsertPoint(&M);
   InsertControl(&M);

@@ -567,6 +567,10 @@ struct Analyzer : AnalysisInfoMixin<Analyzer> {
 
       if (OnlyLib && !callee->empty()) continue;
 
+      if (hDebug) {
+        dbgs() << "Check " << callee->getName() << " In " << F.getName() << '\n';
+      }
+
       auto cg = std::make_unique<DataFlowGraph>(
           callInst, FAM.getResult<MemorySSAAnalysis>(F).getMSSA(),
           FAM.getResult<DominatorTreeAnalysis>(F));
