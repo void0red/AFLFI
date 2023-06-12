@@ -635,21 +635,18 @@ static std::vector<const char *> blackList{
     "strrchr", "strscpy",     "strsep",     "strspn",  "strst"};
 
 hash_code InstPlugin::getLocHash(llvm::CallInst *callInst) {
+  auto *Func = callInst->getParent();
+  auto *Callee = callInst->getCalledFunction();
+  auto  ret = llvm::hash_combine(llvm::hash_value(Func->getName()),
+                                 llvm::hash_value(Callee->getName()));
   if (DILocation *Loc = callInst->getDebugLoc()) {
     StringRef Dir = Loc->getDirectory();
     StringRef File = Loc->getFilename();
     unsigned  Line = Loc->getLine();
-    return llvm::hash_combine(llvm::hash_value(Dir), llvm::hash_value(File),
-                              llvm::hash_value(Line));
+    return llvm::hash_combine(ret, llvm::hash_value(Dir),
+                              llvm::hash_value(File), llvm::hash_value(Line));
   }
-  auto *Func = callInst->getParent();
-  auto *Callee = callInst->getCalledFunction();
-  if (Func && Func->hasName() && Callee && Callee->hasName()) {
-    return llvm::hash_combine(llvm::hash_value(Func->getName()),
-                              llvm::hash_value(Callee->getName()));
-  }
-  // we just hash the ptr to avoid collide
-  return llvm::hash_value(callInst);
+  return ret;
 }
 
 void InstPlugin::CollectInsertPoint(llvm::Module *m) {

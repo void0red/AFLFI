@@ -143,22 +143,19 @@ struct ErrorHandler {
     checked = true;
   }
 
-  hash_code getLocHash() {
+  hash_code getLocHash() const {
+    auto *Func = callInst->getParent();
+    auto *Callee = callInst->getCalledFunction();
+    auto  ret = llvm::hash_combine(llvm::hash_value(Func->getName()),
+                                   llvm::hash_value(Callee->getName()));
     if (DILocation *Loc = callInst->getDebugLoc()) {
       StringRef Dir = Loc->getDirectory();
       StringRef File = Loc->getFilename();
       unsigned  Line = Loc->getLine();
-      return llvm::hash_combine(llvm::hash_value(Dir), llvm::hash_value(File),
-                                llvm::hash_value(Line));
+      return llvm::hash_combine(ret, llvm::hash_value(Dir),
+                                llvm::hash_value(File), llvm::hash_value(Line));
     }
-    auto *Func = callInst->getParent();
-    auto *Callee = callInst->getCalledFunction();
-    if (Func && Func->hasName() && Callee && Callee->hasName()) {
-      return llvm::hash_combine(llvm::hash_value(Func->getName()),
-                                llvm::hash_value(Callee->getName()));
-    }
-    // we just hash the ptr to avoid collide
-    return llvm::hash_value(callInst);
+    return ret;
   }
 
   double similarity(ErrorHandler *other) {

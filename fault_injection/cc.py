@@ -25,6 +25,9 @@ def check_args(l: list):
         compile_mode = True
     if '-o' in l:
         outfile_idx = l.index('-o') + 1
+        # skip asm
+        if l[outfile_idx].endswith('.s') or l[outfile_idx].endswith('.S'):
+            return fixed_args
     if '-' in l:
         # it will read from stdin as input later, so we skip it
         return fixed_args
