@@ -3,6 +3,7 @@ import sys
 import os
 import subprocess
 import logging
+from pathlib import Path
 
 
 def get_bc_name(old, link=False):
@@ -13,7 +14,7 @@ def get_bc_name(old, link=False):
     return old + '.bc'
 
 
-def check_args(l: list):
+def handle_bitcode_mode(l: list):
     logging.debug('recv: ' + ' '.join(l))
 
     compile_mode = False
@@ -63,18 +64,29 @@ def check_args(l: list):
     return fixed_args
 
 
+def handle_afl_mode(l: list):
+    afl_cc = Path(__file__).parent.parent.joinpath('afl-clang-fast')
+    assert afl_cc.exists()
+    return [str(afl_cc)] + l[1:]
+
+
 if __name__ == '__main__':
     if os.environ.get('HOOK_DEBUG'):
         logging.basicConfig(level=logging.DEBUG)
     else:
         logging.basicConfig(level=logging.INFO, filename='compile.log')
+
+    env = os.environ.copy()
+
     if os.environ.get('HOOK_RAW'):
         new_args = ['clang'] + sys.argv[1:]
         logging.info(' '.join(new_args))
-        r = subprocess.run(new_args, env=os.environ)
-        exit(r.returncode)
+    elif os.environ.get('FJ_ERR'):
+        new_args = handle_afl_mode(sys.argv)
+        env.update(AFL_USE_ASAN='1', AFL_USE_UBSAN='1')
+    else:
+        new_args = handle_bitcode_mode(sys.argv)
 
-    new_args = check_args(sys.argv)
     logging.info(' '.join(new_args))
-    r = subprocess.run(new_args, env=os.environ)
+    r = subprocess.run(new_args, env=env)
     exit(r.returncode)

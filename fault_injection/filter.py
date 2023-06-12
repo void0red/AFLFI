@@ -38,7 +38,7 @@ def parse(file):
         for line in f.readlines():
             line = line.strip()
             if line.startswith('#'):
-                if c != 0 and uc != 0:
+                if c != 0 or uc != 0:
                     ret.append(Func(n, c, uc, eh.copy()))
                     eh.clear()
                 n, *o = line[1:].strip().split(',')
