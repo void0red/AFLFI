@@ -17,6 +17,5 @@ if __name__ == '__main__':
     args.extend(sys.argv[1:])
     env = os.environ.copy()
     env.update(AFL_USE_ASAN='1', AFL_USE_UBSAN='1', FJ_ERR=str(errs))
-    print(args, env)
     r = subprocess.run(args, env=env)
     exit(r.returncode)

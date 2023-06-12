@@ -668,6 +668,10 @@ void InstPlugin::CollectInsertPoint(llvm::Module *m) {
       if (std::any_of(blackList.begin(), blackList.end(),
                       [=](const char *prefix) { return fn == prefix; }))
         continue;
+
+      DILocation *Loc = callInst->getDebugLoc();
+      if (!Loc) continue;
+
       if (errorLocs.count(getLocHash(callInst))) {
         errorSite[callInst] = counter++;
       }
