@@ -10,7 +10,6 @@
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Passes/PassPlugin.h>
 #include <llvm/Support/CommandLine.h>
-#include <array>
 #include <condition_variable>
 #include <fstream>
 #include <functional>
@@ -24,6 +23,16 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+static std::vector<const char *> blackList{
+    "bcmp",    "memchr",      "memchr_inv", "memcmp",   "memscan",
+    "stpcpy",  "strcasecmp",  "strcat",     "strchr",   "strchrnul",
+    "strcmp",  "strcpy",      "strcspn",    "strlcat",  "strlcpy",
+    "strlen",  "strncasecmp", "strncat",    "strnchr",  "strnchrnul",
+    "strncmp", "strncpy",     "strnlen",    "strnstr",  "strpbrk",
+    "strrchr", "strscpy",     "strsep",     "strspn",   "strstr",
+    "strtok",  "atoi",        "sprintf",    "snprintf", "sscanf",
+    "memcpy",  "memmove"};
 
 class ThreadPool {
  public:
@@ -563,6 +572,12 @@ struct Analyzer : AnalysisInfoMixin<Analyzer> {
       auto *callee = callInst->getCalledFunction();
       if (!callee || callee->isIntrinsic() ||
           !callee->getReturnType()->isIntOrPtrTy() || !callee->hasName())
+        continue;
+
+      if (std::any_of(blackList.begin(), blackList.end(),
+                      [callee](const std::string &s) {
+                        return s == callee->getName();
+                      }))
         continue;
 
       if (OnlyLib && !callee->empty()) continue;
