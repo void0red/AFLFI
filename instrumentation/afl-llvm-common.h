@@ -83,10 +83,13 @@ class InstPlugin {
   llvm::MDNode      *noSanitizeNode{nullptr};
   llvm::Instruction *setNoSanitize(llvm::Instruction *v);
 
-  llvm::SmallSet<llvm::hash_code, 16>           errorLocs;
+  llvm::SmallSet<llvm::hash_code, 16>       errorLocs;
+  std::unordered_set<std::string>           errorFuncs;
   std::unordered_map<std::string, unsigned> distance;
-  bool                                      loadErrFunc(const char *name);
-  bool                                      loadDistance(const char *name);
+
+  bool loadErrFunc(const char *name);
+  bool loadErrLoc(const char *name);
+  bool loadDistance(const char *name);
 
   std::unordered_map<llvm::CallInst *, uint32_t> errorSite;
 

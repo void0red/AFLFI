@@ -12,7 +12,7 @@ class Func:
     eh: dict
 
     def __str__(self):
-        title = f'# {self.name},{self.checked},{self.unchecked},{self.checked / (self.checked + self.unchecked)}'
+        title = f'{self.name},{self.checked},{self.unchecked},{self.checked / (self.checked + self.unchecked)}'
         return title
 
     __repr__ = __str__
@@ -25,8 +25,8 @@ class Func:
         self.eh = {k: v for k, v in self.eh.items() if v < sim}
         return self
 
-    def str(self):
-        return self.__str__() + '\n' + '\n'.join(self.eh.keys()) + '\n'
+    def loc(self):
+        return '#' + self.__str__() + '\n' + '\n'.join(self.eh.keys()) + '\n'
 
 
 global_locs = {}
@@ -58,22 +58,26 @@ def parse(file):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--errs', default='errs.txt')
+    parser = argparse.ArgumentParser(description='gen loc.txt and func.txt from analyzer result')
+    parser.add_argument('input', type=str, help='analyzer result file')
     parser.add_argument('--filter', type=float, default=0.7)
     parser.add_argument('--sim', type=float, default=0.9)
-    parser.add_argument('--out', default='errs.filter.txt')
-    parser.add_argument('--show', action='store_true')
+    parser.add_argument('--debug', action='store_true')
     args = parser.parse_args()
-    assert Path(args.errs).exists()
+    assert Path(args.input).exists()
 
-    funcs = parse(args.errs)
+    funcs = parse(args.input)
 
-    with open(args.out, 'w') as f:
-        for i in funcs:
-            if i.do_filter(args.filter, args.sim):
-                f.write(i.str())
-    if args.show:
+    loc_file = open('loc.txt', 'w')
+    func_file = open('func.txt', 'w')
+    for i in funcs:
+        if i.do_filter(args.filter, args.sim):
+            loc_file.write(i.loc())
+            func_file.write(str(i))
+    loc_file.close()
+    func_file.close()
+
+    if args.debug:
         l = [(i, i.checked / (i.unchecked + i.checked)) for i in funcs if i.unchecked != 0]
         for i in sorted(l, key=lambda x: x[1], reverse=True):
             print(i[0])

@@ -119,9 +119,10 @@ static cl::opt<std::string>  InputList("list", cl::Optional,
                                        cl::desc("<list file>"),
                                        cl::cat(DefaultCat));
 
-static cl::opt<std::string> ErrFile("errs", cl::Optional, cl::init("-"),
-                                    cl::desc("<output errs file>"),
-                                    cl::cat(DefaultCat));
+static cl::opt<std::string> OutputFile("out", cl::Optional,
+                                       cl::init("analyzer.log"),
+                                       cl::desc("<output analyzer log>"),
+                                       cl::cat(DefaultCat));
 
 static cl::opt<bool> OnlyLib("onlylib", cl::desc("only focus on lib function"),
                              cl::cat(DefaultCat));
@@ -784,6 +785,6 @@ int main(int argc, char *argv[]) {
   runner->loadFiles(files);
   runner->execute();
   std::error_code EC;
-  raw_fd_ostream  out(ErrFile, EC);
+  raw_fd_ostream  out(OutputFile, EC);
   runner->dump(out);
 }

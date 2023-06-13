@@ -83,7 +83,11 @@ if __name__ == '__main__':
     if env.get('HOOK_RAW'):
         new_args = ['clang'] + sys.argv[1:]
         logging.info(' '.join(new_args))
-    elif env.get('FJ_ERR') or env.get('AFL_USE_ASAN') or env.get('AFL_USE_UBSAN'):
+    elif env.get('FJ_FUNC') or \
+            env.get('FJ_LOC') or \
+            env.get('FJ_DIS') or \
+            env.get('AFL_USE_ASAN') or \
+            env.get('AFL_USE_UBSAN'):
         new_args = handle_afl_mode(sys.argv)
     else:
         new_args = handle_bitcode_mode(sys.argv)

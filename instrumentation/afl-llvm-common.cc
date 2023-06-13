@@ -611,9 +611,10 @@ llvm::Instruction *InstPlugin::setNoSanitize(llvm::Instruction *v) {
 }
 
 void InstPlugin::runOnModule(llvm::Module &M) {
-  loadErrFunc(getenv("FJ_ERR"));
+  loadErrFunc(getenv("FJ_FUNC"));
+  loadErrLoc(getenv("FJ_LOC"));
   loadDistance(getenv("FJ_DIS"));
-  if (errorLocs.empty()) return;
+  if (errorLocs.empty() || errorFuncs.empty()) return;
 
   IRBuilder<> IRB(M.getContext());
   FaultInjectionControlFunc = M.getOrInsertFunction(
@@ -626,14 +627,6 @@ void InstPlugin::runOnModule(llvm::Module &M) {
   CollectInsertPoint(&M);
   InsertControl(&M);
 }
-
-static std::vector<const char *> blackList{
-    "bcmp",    "memchr",      "memchr_inv", "memcmp",  "memscan",
-    "stpcpy",  "strcasecmp",  "strcat",     "strchr",  "strchrnul",
-    "strcmp",  "strcpy",      "strcspn",    "strlcat", "strlcpy",
-    "strlen",  "strncasecmp", "strncat",    "strnchr", "strnchrnul",
-    "strncmp", "strncpy",     "strnlen",    "strnstr", "strpbrk",
-    "strrchr", "strscpy",     "strsep",     "strspn",  "strst"};
 
 hash_code InstPlugin::getLocHash(llvm::CallInst *callInst) {
   auto *Func = callInst->getParent();
@@ -665,9 +658,10 @@ void InstPlugin::CollectInsertPoint(llvm::Module *m) {
 
       auto fn = callee->getName().split('.').first.str();
 
-      if (std::any_of(blackList.begin(), blackList.end(),
-                      [=](const char *prefix) { return fn == prefix; }))
+      if (errorFuncs.find(fn) != errorFuncs.end()) {
+        errorSite[callInst] = counter++;
         continue;
+      }
 
       DILocation *Loc = callInst->getDebugLoc();
       if (!Loc) continue;
@@ -714,6 +708,22 @@ void InstPlugin::InsertControl(llvm::Module *m) {
 }
 
 bool InstPlugin::loadErrFunc(const char *name) {
+  if (name == nullptr) return false;
+  std::ifstream f(name);
+  if (!f.is_open()) return false;
+
+  std::string buf;
+  while (std::getline(f, buf)) {
+    StringRef bufp(buf);
+    if (bufp.startswith("#")) continue;
+    auto idx = bufp.find(',');
+    if (idx != StringRef::npos) bufp = bufp.substr(0, idx);
+    errorFuncs.insert(bufp.trim().str());
+  }
+  return true;
+}
+
+bool InstPlugin::loadErrLoc(const char *name) {
   if (name == nullptr) return false;
   std::ifstream f(name);
   if (!f.is_open()) return false;
