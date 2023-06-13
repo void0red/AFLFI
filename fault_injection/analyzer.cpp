@@ -261,6 +261,7 @@ class DataFlowGraph {
   using BBVec = std::vector<BasicBlock *>;
 
   std::vector<Path> checkedPath;
+  bool              isReturn{false};
 
   bool elemVisited(llvm::Value *elem, bool noInsert = false) {
     if (visited.find(elem) == visited.end()) {
@@ -526,6 +527,8 @@ class DataFlowGraph {
         } else if (auto *switchInst = dyn_cast<SwitchInst>(uInst)) {
           assert(switchInst->getCondition() == i);
           backwardSave(uNode, checkedPath);
+        } else if (isa<ReturnInst>(uInst)) {
+          isReturn = true;
         } else if (isa<CmpInst>(uInst) || isa<LoadInst>(uInst) ||
                    isa<PHINode>(uInst) || isa<PtrToIntInst>(uInst) ||
                    isa<CastInst>(uInst) || isa<SelectInst>(uInst)) {
@@ -551,6 +554,7 @@ class DataFlowGraph {
         ret.swap(eh);
       }
     }
+    if (!ret->checked && isReturn) ret->checked = true;
     return ret.release();
   }
 
