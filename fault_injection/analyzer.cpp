@@ -568,7 +568,8 @@ struct Analyzer : AnalysisInfoMixin<Analyzer> {
       if (OnlyLib && !callee->empty()) continue;
 
       if (hDebug) {
-        dbgs() << "Check " << callee->getName() << " In " << F.getName() << '\n';
+        dbgs() << "Check " << callee->getName() << " In " << F.getName()
+               << '\n';
       }
 
       auto cg = std::make_unique<DataFlowGraph>(
@@ -736,7 +737,10 @@ class Runner {
       snprintf(buf, sizeof(buf), "%0.3lf", pair.second);
       OS << buf << '\n';
       for (auto eh : unchecked[pair.first]) {
-        OS << eh->getLocHash() << '\n';
+        OS << eh->getLocHash() << ',';
+        auto &loc = eh->callInst->getDebugLoc();
+        loc.print(OS);
+        OS << '\n';
       }
       for (auto eh : checked[pair.first]) {
         snprintf(buf, sizeof(buf), "%0.3lf", sims[eh]);

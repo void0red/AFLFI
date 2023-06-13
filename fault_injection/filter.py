@@ -45,12 +45,13 @@ def parse(file):
                 c = int(o[0])
                 uc = int(o[1])
                 continue
-            if ',' in line:
-                h, v = line.split(',')
-            else:
-                h, v = line, 0
-            if (h in eh and float(v) < eh[h]) or (h not in eh):
-                eh[h] = float(v)
+            h, v = line.split(',')
+            try:
+                v = float(v)
+            except ValueError:
+                v = 0.0
+            if (h in eh and v < eh[h]) or (h not in eh):
+                eh[h] = v
     return ret
 
 

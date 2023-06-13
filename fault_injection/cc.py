@@ -32,6 +32,8 @@ def handle_bitcode_mode(l: list):
     if '-' in l:
         # it will read from stdin as input later, so we skip it
         return fixed_args
+    if l[-1].endswith('.s') or l[-1].endswith('.S'):
+        return fixed_args
 
     multi_objs = [v for i, v in enumerate(l) if v.endswith('.o') and i != outfile_idx]
 
@@ -76,14 +78,13 @@ if __name__ == '__main__':
     else:
         logging.basicConfig(level=logging.INFO, filename='compile.log')
 
-    env = os.environ.copy()
+    env = os.environ
 
-    if os.environ.get('HOOK_RAW'):
+    if env.get('HOOK_RAW'):
         new_args = ['clang'] + sys.argv[1:]
         logging.info(' '.join(new_args))
-    elif os.environ.get('FJ_ERR'):
+    elif env.get('FJ_ERR') or env.get('AFL_USE_ASAN') or env.get('AFL_USE_UBSAN'):
         new_args = handle_afl_mode(sys.argv)
-        env.update(AFL_USE_ASAN='1', AFL_USE_UBSAN='1')
     else:
         new_args = handle_bitcode_mode(sys.argv)
 
