@@ -61,6 +61,7 @@ if __name__ == '__main__':
     parser.add_argument('--filter', type=float, default=0.7)
     parser.add_argument('--sim', type=float, default=0.9)
     parser.add_argument('--out', default='errs.filter.txt')
+    parser.add_argument('--show', action='store_true')
     args = parser.parse_args()
     assert Path(args.errs).exists()
 
@@ -70,3 +71,7 @@ if __name__ == '__main__':
         for i in funcs:
             if i.do_filter(args.filter, args.sim):
                 f.write(i.str())
+    if args.show:
+        l = [(i, i.checked / (i.unchecked + i.checked)) for i in funcs if i.unchecked != 0]
+        for i in sorted(l, key=lambda x: x[1], reverse=True):
+            print(i[0].str())

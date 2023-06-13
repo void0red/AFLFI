@@ -9,8 +9,13 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <execinfo.h>
+#include <threads.h>
+
+#define XXH_INLINE_ALL
+#include "xxhash.h"
+#undef XXH_INLINE_ALL
+
 static struct ctl_block *cb;
-static FILE             *debug_stream;
 static bool              __init_done = false;
 static bool              __afl_debug = false;
 
@@ -43,38 +48,32 @@ __attribute__((constructor(10086))) void __fault_injection_init() {
 
   if (__afl_debug) fprintf(stderr, "fault injection control block at %p\n", cb);
 
-  if (cb->log_lvl) {
-    debug_stream = fdopen(cb->debug_fd, "w+");
-    if (!debug_stream) {
-      if (__afl_debug) fprintf(stderr, "open debug file failed\n");
-    }
-  }
+  //  if (cb->log_lvl) {
+  //    debug_stream = fdopen(cb->debug_fd, "w+");
+  //    if (!debug_stream) {
+  //      if (__afl_debug) fprintf(stderr, "open debug file failed\n");
+  //    }
+  //  }
 
   __init_done = true;
 }
 
+#define STACK_BUFFER_SIZE 64
+thread_local void *stack_buf[STACK_BUFFER_SIZE] = {NULL};
+
 static inline void do_log(uint64_t addr) {
-  uint64_t *slot = &cb->trace_addr[cb->trace_size];
-  if ((void *)slot >= CTL_BLOCK_END(cb)) {
-    fprintf(stderr, "full track buffer\n");
-    return;
-  }
-  *slot = addr;
-  cb->trace_size += 1;
-
-  if (!debug_stream) return;
-  fprintf(debug_stream, "failth %d, addr 0x%lx\n", cb->hit, addr);
-
-  if (cb->log_lvl > 1) {
-#define STACK_BUFFER_SIZE 128
-    void *buf[STACK_BUFFER_SIZE] = {NULL};
-    int   size = backtrace(buf, STACK_BUFFER_SIZE);
-    if (size > 0) {
-      fflush(debug_stream);
-      backtrace_symbols_fd(buf, size, cb->debug_fd);
-      fprintf(debug_stream, "\n\n");
+  int size = backtrace(stack_buf, STACK_BUFFER_SIZE);
+  if (size > 0) {
+    uint64_t  v = XXH3_64bits(stack_buf, size * sizeof(void *));
+    uint64_t *slot = &cb->trace_addr[cb->trace_size];
+    if ((void *)slot >= CTL_BLOCK_END(cb)) {
+      fprintf(stderr, "full track buffer\n");
+      return;
     }
+    *slot = v;
+    cb->trace_size += 1;
   }
+  if (__afl_debug) fprintf(stderr, "failth %d, addr 0x%lx\n", cb->hit, addr);
 }
 
 bool __fault_injection_control() {

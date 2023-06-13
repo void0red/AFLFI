@@ -18,8 +18,8 @@ extern "C" {
 typedef struct ctl_block {
   uint32_t on;
   uint32_t hit;
-  uint32_t log_lvl;
-  int32_t  debug_fd;
+//  uint32_t log_lvl;
+//  int32_t  debug_fd;
 
   uint32_t fail_size;
   uint32_t enable_size;

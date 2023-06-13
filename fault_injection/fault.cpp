@@ -50,6 +50,7 @@ struct Manager {
   std::deque<FailSeq *> work_queue, free_queue;
 
   std::function<uint8_t()> current_runner;
+  std::string              current_fn;
 
   std::unordered_map<uint64_t, std::unordered_set<std::string>> triggered;
   std::unordered_set<std::string>                               testcases;
@@ -129,6 +130,7 @@ ctl_block_t *fj_getctl(struct Manager *mgr) {
 
 init_state_t fj_init_run(struct Manager *mgr, const char *fn, fuzz_func func,
                          void *afl, void *buf, uint32_t len) {
+  mgr->current_fn = fn;
   if (mgr->have_run(fn)) return FJ_INIT_SKIP;
 
   mgr->current_runner = [=] { return func(afl, buf, len); };
@@ -168,6 +170,8 @@ run_state_t fj_next_run(struct Manager *mgr) {
 
   if (mgr->last_hit > seq->raw_hit) {
     fj_save_current(mgr);
+    // just save trigger
+    mgr->have_new_trace(mgr->current_fn);
     return FJ_RUN_SAVED;
   }
   return FJ_RUN_NEXT;

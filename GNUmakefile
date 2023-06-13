@@ -335,7 +335,7 @@ llvm:
 fault: fault-rt fault.o fault-analyzer
 
 fault-rt:
-	-$(CC) $(CFLAGS) -c fault_injection/rt.c -o fj-rt.o
+	-$(CC) $(CFLAGS) -c fault_injection/rt.c -Iinclude -o fj-rt.o
 
 fault.o:
 	-$(CXX) -c -O2 -g fault_injection/fault.cpp -Iinclude -o fault.o
