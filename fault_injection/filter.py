@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
-import sys
 from dataclasses import dataclass
 import argparse
 from pathlib import Path
-from collections import Counter
 
 
 @dataclass
@@ -31,6 +29,9 @@ class Func:
         return self.__str__() + '\n' + '\n'.join(self.eh.keys()) + '\n'
 
 
+global_locs = {}
+
+
 def parse(file):
     n, c, uc, eh = '', 0, 0, {}
     ret = []
@@ -49,6 +50,7 @@ def parse(file):
             try:
                 v = float(v)
             except ValueError:
+                global_locs[h] = v
                 v = 0.0
             if (h in eh and v < eh[h]) or (h not in eh):
                 eh[h] = v
@@ -74,4 +76,7 @@ if __name__ == '__main__':
     if args.show:
         l = [(i, i.checked / (i.unchecked + i.checked)) for i in funcs if i.unchecked != 0]
         for i in sorted(l, key=lambda x: x[1], reverse=True):
-            print(i[0].str())
+            print(i[0])
+            for k, v in i[0].eh.items():
+                if v == 0.0 and k in global_locs:
+                    print(k, global_locs[k])
