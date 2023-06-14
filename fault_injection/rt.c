@@ -30,7 +30,7 @@ __attribute__((constructor(10086))) void __fault_injection_init() {
 
   char *id = getenv(FAULT_INJECTION_ID_STR);
   if (!id || id[0] == '\0') {
-    if (__afl_debug) fprintf(stderr, "can't find FAULT_INJECTION_ID_STR env");
+    if (__afl_debug) fprintf(stderr, "can't find FAULT_INJECTION_ID_STR env\n");
     return;
   }
   int fd = shm_open(id, O_RDWR, 0666);

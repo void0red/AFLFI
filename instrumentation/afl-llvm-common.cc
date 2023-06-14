@@ -611,10 +611,20 @@ llvm::Instruction *InstPlugin::setNoSanitize(llvm::Instruction *v) {
 }
 
 void InstPlugin::runOnModule(llvm::Module &M) {
-  loadErrFunc(getenv("FJ_FUNC"));
-  loadErrLoc(getenv("FJ_LOC"));
-  loadDistance(getenv("FJ_DIS"));
-  if (errorLocs.empty() || errorFuncs.empty()) return;
+  if (auto *f = getenv("FJ_FUNC")) {
+    loadErrFunc(f);
+    DEBUGF("Load %ld from %s\n", errorFuncs.size(), f);
+  }
+  if (auto *f = getenv("FJ_LOC")) {
+    loadErrLoc(f);
+    DEBUGF("Load %ld from %s\n", errorLocs.size(), f);
+  }
+  if (auto *f = getenv("FJ_DIS")) {
+    loadDistance(f);
+    DEBUGF("Load %ld from %s\n", distance.size(), f);
+  }
+
+  if (errorLocs.empty() && errorFuncs.empty()) return;
 
   IRBuilder<> IRB(M.getContext());
   FaultInjectionControlFunc = M.getOrInsertFunction(

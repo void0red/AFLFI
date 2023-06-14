@@ -15,11 +15,15 @@
 extern "C" {
 #endif
 
+/*
+ * switch(on)
+ * case 0: disable
+ * case 1: probe
+ * case 2: normal
+ */
 typedef struct ctl_block {
   uint32_t on;
   uint32_t hit;
-//  uint32_t log_lvl;
-//  int32_t  debug_fd;
 
   uint32_t fail_size;
   uint32_t enable_size;

@@ -12,8 +12,7 @@ class Func:
     eh: dict
 
     def __str__(self):
-        title = f'{self.name},{self.checked},{self.unchecked},{self.checked / (self.checked + self.unchecked)}'
-        return title
+        return f'{self.name},{self.checked},{self.unchecked},{self.checked / (self.checked + self.unchecked)}\n'
 
     __repr__ = __str__
 
@@ -59,7 +58,7 @@ def parse(file):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='gen loc.txt and func.txt from analyzer result')
-    parser.add_argument('input', type=str, help='analyzer result file')
+    parser.add_argument('--input', type=str, help='analyzer result file', default='analyzer.log')
     parser.add_argument('--filter', type=float, default=0.7)
     parser.add_argument('--sim', type=float, default=0.9)
     parser.add_argument('--debug', action='store_true')
