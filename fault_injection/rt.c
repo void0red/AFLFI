@@ -68,10 +68,10 @@ static inline void do_log(uint64_t addr) {
   int size = backtrace(stack_buf, STACK_BUFFER_SIZE);
   if (size > 0) {
     if (__afl_debug) {
+      char **sym = backtrace_symbols(stack_buf, size);
       for (int i = 0; i < size; ++i) {
-        fprintf(stderr, "%p ", stack_buf[i]);
+        fprintf(stderr, "%p,%s\n", stack_buf[i], sym[i]);
       }
-      fprintf(stderr, "\n");
     }
     uint64_t  v = XXH3_64bits(stack_buf, size * sizeof(void *));
     uint64_t *slot = &cb->trace_addr[cb->trace_size];

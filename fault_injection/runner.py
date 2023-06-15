@@ -64,7 +64,7 @@ class Runner:
         self.shm = SharedMemory(self.shm_name, create=True, size=self.shm_size)
 
         self.env = os.environ.copy()
-        self.env.update(AFL_DEBUG='1', FJ_SHM_ID=self.shm_name, FJ_SHM_SIZE=self.shm_size)
+        self.env.update(AFL_DEBUG='1', FJ_SHM_ID=self.shm_name, FJ_SHM_SIZE=str(self.shm_size))
 
     def __set_ctl_block(self, *args, **kwargs):
         b = bytes(CtlBlock(*args, **kwargs))
@@ -83,7 +83,7 @@ class Runner:
         return self.execute(on=2, fail_size=1, fails=(ctypes.c_uint32 * 16)(failth, ))
 
     def probe(self):
-        ctl, log = self.execute(on=1, hit=0)
+        ctl, log = self.execute(on=1)
         max_hit = (self.shm_size - ctypes.sizeof(ctl)) // 8
         print(f'probe {ctl.hit} errors, max {max_hit} errors, {ctl.trace_size} traces')
 
