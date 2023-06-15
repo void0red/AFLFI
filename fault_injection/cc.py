@@ -30,7 +30,7 @@ def handle_bitcode_mode(l: list):
         if l[outfile_idx].endswith('.s') or l[outfile_idx].endswith('.S'):
             return fixed_args
     if '-' in l:
-        # it will read from stdin as input later, so we skip it
+        # it will read from stdin as input later, srmrro we skip it
         return fixed_args
     if l[-1].endswith('.s') or l[-1].endswith('.S'):
         return fixed_args

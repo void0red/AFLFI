@@ -72,6 +72,7 @@ static inline void do_log(uint64_t addr) {
       for (int i = 0; i < size; ++i) {
         fprintf(stderr, "%p,%s\n", stack_buf[i], sym[i]);
       }
+      free(sym);
     }
     uint64_t  v = XXH3_64bits(stack_buf, size * sizeof(void *));
     uint64_t *slot = &cb->trace_addr[cb->trace_size];
