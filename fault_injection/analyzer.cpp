@@ -32,7 +32,9 @@ static std::vector<const char *> blackList{
     "strncmp", "strncpy",     "strnlen",    "strnstr",  "strpbrk",
     "strrchr", "strscpy",     "strsep",     "strspn",   "strstr",
     "strtok",  "atoi",        "sprintf",    "snprintf", "sscanf",
-    "memcpy",  "memmove"};
+    "memcpy",  "memmove",     "atoi",       "atol",     "atoll",
+    "strtol",  "strtoll",     "strtoul",    "strtoull", "strtod",
+    "strtof",  "strtold"};
 
 class ThreadPool {
  public:

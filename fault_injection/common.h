@@ -9,7 +9,9 @@
 #define MAX_FAIL_SIZE 16
 #define MAX_ENABLE_SIZE 32
 #define MAX_DISABLE_SIZE 128
-#define FAULT_INJECTION_ID_STR "__fault_injection_id"
+#define FJ_SHM_ID "FJ_SHM_ID"
+#define FJ_SHM_SIZE "FJ_SHM_SIZE"
+#define FJ_SHM_DEFAULT_SIZE (1 << 20)
 
 #ifdef __cplusplus
 extern "C" {
@@ -39,8 +41,5 @@ typedef struct ctl_block {
 #ifdef __cplusplus
 }
 #endif
-
-#define CTL_BLOCK_SIZE (4096)
-#define CTL_BLOCK_END(head) ((void *)(head) + CTL_BLOCK_SIZE)
 
 #endif  // AFLPLUSPLUS_COMMON_H

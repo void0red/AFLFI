@@ -13,6 +13,7 @@ def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--failth', type=int)
     parser.add_argument('--debug', action='store_true')
+    parser.add_argument('--probe', action='store_true')
     parser.add_argument('exe', type=str, nargs=argparse.REMAINDER)
     return parser.parse_args()
 
@@ -47,11 +48,10 @@ class CtlBlock(ctypes.Structure):
 
 
 class LogParser:
-    def __init__(self, out: bytes):
-        logging.debug(out.decode())
-        pattern = re.compile(b'failth (\d+), addr (.+?)\n')
-        r = re.findall(pattern, out)
-        logging.warning(r)
+    def __init__(self, out: str):
+        logging.debug(out)
+        pattern = re.compile('failth \d+, addr (.+?)\n')
+        self.addrs = re.findall(pattern, out)
 
 
 class Runner:
@@ -59,11 +59,12 @@ class Runner:
         self.bin = cmd[0]
         self.cmd = cmd
 
+        self.shm_size = 1 << 20
         self.shm_name = f'fj.runner.{idx}'
-        self.shm = SharedMemory(self.shm_name, create=True, size=(4 << 10))
+        self.shm = SharedMemory(self.shm_name, create=True, size=self.shm_size)
 
         self.env = os.environ.copy()
-        self.env.update(AFL_DEBUG='1', __fault_injection_id=self.shm_name)
+        self.env.update(AFL_DEBUG='1', FJ_SHM_ID=self.shm_name, FJ_SHM_SIZE=self.shm_size)
 
     def __set_ctl_block(self, *args, **kwargs):
         b = bytes(CtlBlock(*args, **kwargs))
@@ -76,14 +77,19 @@ class Runner:
     def execute(self, *args, **kwargs):
         self.__set_ctl_block(*args, **kwargs)
         r = subprocess.run(self.cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=self.env)
-        return self.__read_ctl_block(), LogParser(r.stderr)
+        return self.__read_ctl_block(), LogParser(r.stderr.decode())
 
     def run_one(self, failth):
         return self.execute(on=2, fail_size=1, fails=(ctypes.c_uint32 * 16)(failth, ))
 
+    def probe(self):
+        ctl, log = self.execute(on=1, hit=0)
+        max_hit = (self.shm_size - ctypes.sizeof(ctl)) // 8
+        print(f'probe {ctl.hit} errors, max {max_hit} errors, {ctl.trace_size} traces')
+
     def loop(self):
         ctl, log = self.execute(on=1)
-        logging.warning(bytes(ctl.hit))
+        logging.debug(f'total {ctl.hit} errors')
         for i in range(ctl.hit):
             self.execute(on=2, fail_size=1, fails=(ctypes.c_uint32 * 16)(i, ))
 
@@ -99,7 +105,9 @@ if __name__ == '__main__':
     else:
         logging.basicConfig(level=logging.WARN)
     r = Runner(parm.exe)
-    if parm.failth:
+    if parm.probe:
+        r.probe()
+    elif parm.failth:
         r.run_one(parm.failth)
     else:
         r.loop()

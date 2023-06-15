@@ -24,16 +24,16 @@ static ctl_block_t *init_ctl_block(uint8_t *id) {
     perror("shm_open failed");
     exit(1);
   }
-  len = ftruncate(fd, CTL_BLOCK_SIZE);
+  len = ftruncate(fd, FJ_SHM_DEFAULT_SIZE);
 
-  void *addr =
-      mmap(nullptr, CTL_BLOCK_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+  void *addr = mmap(nullptr, FJ_SHM_DEFAULT_SIZE, PROT_READ | PROT_WRITE,
+                    MAP_SHARED, fd, 0);
   if (addr == MAP_FAILED) {
     perror("mmap failed");
     exit(1);
   }
   close(fd);
-  setenv(FAULT_INJECTION_ID_STR, name, 1);
+  setenv(FJ_SHM_ID, name, 1);
   return static_cast<ctl_block_t *>(addr);
 };
 
