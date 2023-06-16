@@ -33,6 +33,8 @@ typedef enum run_state {
 
 run_state_t fj_next_run(struct Manager *mgr);
 
+#define FJ_DISABLE_RANDOMIZE_CHECK "FJ_DISABLE_RANDOMIZE_CHECK"
+bool check_randomize();
 #ifdef __cplusplus
 }
 #endif

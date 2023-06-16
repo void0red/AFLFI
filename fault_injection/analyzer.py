@@ -12,7 +12,7 @@ class Func:
     eh: dict
 
     def __str__(self):
-        return f'{self.name},{self.checked},{self.unchecked},{self.checked / (self.checked + self.unchecked)}\n'
+        return f'{self.name},{self.checked},{self.unchecked},{self.checked / (self.checked + self.unchecked)}'
 
     __repr__ = __str__
 
@@ -72,7 +72,7 @@ if __name__ == '__main__':
     for i in funcs:
         if i.do_filter(args.filter, args.sim):
             loc_file.write(i.loc())
-            func_file.write(str(i))
+            func_file.write(str(i) + '\n')
     loc_file.close()
     func_file.close()
 
@@ -83,3 +83,4 @@ if __name__ == '__main__':
             for k, v in i[0].eh.items():
                 if v == 0.0 and k in global_locs:
                     print(k, global_locs[k])
+            print()

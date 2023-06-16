@@ -1412,6 +1412,9 @@ int main(int argc, char **argv_orig, char **envp) {
     afl->mgr = fj_init("default");
   }
 
+  if (!check_randomize())
+    FATAL("set FJ_DISABLE_RANDOMIZE_CHECK to disable the check");
+
   if (!strcmp(afl->in_dir, afl->out_dir)) {
 
     FATAL("Input and output directories can't be the same");

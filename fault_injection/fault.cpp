@@ -145,7 +145,7 @@ init_state_t fj_init_run(struct Manager *mgr, const char *fn, fuzz_func func,
 
   // init task
   uint32_t hit = mgr->ctl->hit;
-  for (uint32_t i = 0; i < hit; ++i) {
+  for (uint32_t i = 1; i <= hit; ++i) {
     FailSeq *seq = mgr->get_free();
     seq->raw_hit = hit;
     seq->fails.push_back(i);
@@ -189,10 +189,24 @@ void fj_save_current(struct Manager *mgr) {
   std::vector<uint32_t> fails = mgr->last_seq->fails;
   uint32_t              last_failth = *fails.end();
 
-  for (uint32_t i = last_failth + 1; i < max_hit; ++i) {
+  for (uint32_t i = last_failth + 1; i <= max_hit; ++i) {
     FailSeq *seq = mgr->get_free();
     seq->raw_hit = max_hit;
     seq->fails = fails;
     seq->fails.push_back(i);
   }
+}
+
+bool check_randomize() {
+  if (getenv(FJ_DISABLE_RANDOMIZE_CHECK)) return true;
+  int fd = open("/proc/sys/kernel/randomize_va_space", O_RDONLY);
+  if (fd < 0) return false;
+  char buf[2];
+  if (read(fd, buf, sizeof(buf)) < 0) {
+    close(fd);
+    return false;
+  }
+  close(fd);
+  if (buf[0] != 0) return false;
+  return true;
 }

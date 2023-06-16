@@ -10,16 +10,7 @@ from dataclasses import dataclass, field
 from multiprocessing.shared_memory import SharedMemory
 from pathlib import Path
 import asyncio
-
-
-def get_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--failth', type=int)
-    parser.add_argument('--debug', action='store_true')
-    parser.add_argument('--probe', action='store_true')
-    parser.add_argument('--thread', action='store_true')
-    parser.add_argument('exe', type=str, nargs=argparse.REMAINDER)
-    return parser.parse_args()
+import time
 
 
 # typedef struct ctl_block {
@@ -57,7 +48,7 @@ class CtlBlock(ctypes.Structure):
 @dataclass
 class Symbol:
     exe: str
-    func: str = field(init=False, default=None)
+    func: str
     addr: str
     loc: list
 
@@ -85,8 +76,7 @@ class Symbolizer:
                 addr1, exe, func, pos, addr2 = r.groups()
                 assert addr1 == addr2
                 if func:
-                    s = Symbol(exe, pos, [])
-                    s.func = func
+                    s = Symbol(exe, func, pos, [])
                     ret.append(f'{addr1},{s}')
                 else:
                     s = self.__lazy_cache(exe, pos)
@@ -168,7 +158,7 @@ class Symbolizer:
         for line in r.stdout.decode().splitlines():
             if line in addrs:
                 if last_addr:
-                    self.cache[(exe, last_addr)] = Symbol(exe, last_addr, current_locs.copy())
+                    self.cache[(exe, last_addr)] = Symbol(exe, current_locs[0][-1], last_addr, current_locs.copy())
                     current_locs.clear()
                 last_addr = line
                 continue
@@ -183,14 +173,19 @@ class Symbolizer:
             current_func = None
 
             # remember to handle last one
-            self.cache[(exe, last_addr)] = Symbol(exe, last_addr, current_locs.copy())
+            self.cache[(exe, last_addr)] = Symbol(exe, current_locs[0][-1], last_addr, current_locs.copy())
+
+
+class CrashAnalyzer:
+    pass
 
 
 class Monitor:
     SYM = Symbolizer()
 
-    def __init__(self, text: str):
+    def __init__(self, text: str = None):
         self.raw = text
+        logging.debug(text)
 
     def bug(self):
         if 'LeakSanitizer' in self.raw or \
@@ -198,8 +193,9 @@ class Monitor:
             return True
         return False
 
-    def dump(self, fn):
+    def dump(self, cmd, fn):
         with open(fn, 'w') as f:
+            f.write(cmd + '\n')
             f.write(self.SYM.symbolify(self.raw))
 
 
@@ -252,7 +248,8 @@ class Runner:
 
 class RunnerPool:
     def __init__(self, cmd, n, debug=False):
-        self.name = Path(cmd[0]).name
+        self.cmd = ' '.join(cmd)
+        self.name = Path(cmd[0]).name + ',' + str(int(time.time()))
         self.runners = asyncio.Queue(n)
         for i in range(n):
             self.runners.put_nowait(Runner(cmd, i, debug))
@@ -262,14 +259,16 @@ class RunnerPool:
 
     async def run_one(self, i):
         inst: Runner = await self.runners.get()
-        ctl, mon = await inst.run_one(i)
-        ctl: CtlBlock
-        mon: Monitor
-        if mon.bug():
-            mon.dump(f'{self.name},runner:{inst.id},{ctl.get_fails()}.log')
+        try:
+            ctl, mon = await asyncio.wait_for(inst.run_one(i), 60)
+            if mon.bug():
+                mon.dump(self.cmd,
+                         f'{self.name},runner:{inst.id},{ctl.get_fails()}.log')
+        except asyncio.TimeoutError:
+            logging.warning(f'runner {inst.id} timeout')
         self.runners.put_nowait(inst)
         self.counter += 1
-        logging.info(f'task done {self.counter}/{self.total}')
+        print(f'task done {self.counter}/{self.total}', end='\r')
 
     async def loop(self):
         inst: Runner = await self.runners.get()
@@ -277,7 +276,17 @@ class RunnerPool:
         self.runners.put_nowait(inst)
         self.total = hit
         await asyncio.gather(*[self.run_one(i) for i in range(1, hit + 1)])
-        logging.critical('ok')
+
+
+def get_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--failth', type=int)
+    parser.add_argument('--debug', action='store_true')
+    parser.add_argument('--probe', action='store_true')
+    parser.add_argument('--thread', action='store_true')
+    # parser.add_argument('--timeout', type=int, default=60)
+    parser.add_argument('exe', type=str, nargs=argparse.REMAINDER)
+    return parser.parse_args()
 
 
 if __name__ == '__main__':
