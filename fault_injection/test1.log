@@ -1,0 +1,131 @@
+./mpv/build/mpv --vo=image --vo-image-outdir=/tmp samples/mpeg4/demo.m4v
+DEBUG: debug enabled
+DEBUG: (0) init map size is 2097152 to 0x55555672bd60
+DEBUG: (1) id_str <null>, __afl_area_ptr 0x55555672bd60, __afl_area_initial 0x55555672bd60, __afl_area_ptr_dummy 0x55555672bd60, __afl_map_addr 0x0, MAP_SIZE 65536, __afl_final_loc 0, __afl_map_size 2097152, max_size_forkserver 8388608/0x800000
+DEBUG: (2) id_str <null>, __afl_area_ptr 0x55555672bd60, __afl_area_initial 0x55555672bd60, __afl_area_ptr_dummy 0x55555672bd60, __afl_map_addr 0x0, MAP_SIZE 65536, __afl_final_loc 0, __afl_map_size 2097152, max_size_forkserver 8388608/0x800000
+DEBUG: cmplog id_str <null>
+Running __sanitizer_cov_trace_pc_guard_init: 0x555555d8f1e0-0x555555dd71f8 (73734 edges) after_fs=0
+Done __sanitizer_cov_trace_pc_guard_init: __afl_final_loc = 73739
+fault injection control block at 0x7fffeb100000, size 1048576
+failth 4962, addr 0x55555582ae17
+0x5555556e044b,Symbol(exe='./mpv/build/mpv', func='backtrace', addr='0x5b', loc=[])
+0x555555bb4837,Symbol(exe='./mpv/build/mpv', func='__fault_injection_control', addr='0x1b7', loc=[])
+0x55555582ae17,Symbol(exe='./mpv/build/mpv', func='demux_open_lavf', addr='0x2d6e17', loc=[('/root/mpv/demux/demux_lavf.c', 1023, 'demux_open_lavf')])
+0x5555558121be,Symbol(exe='./mpv/build/mpv', func='open_given_type', addr='0x2be1be', loc=[('/root/mpv/demux/demux.c', 3338, 'open_given_type')])
+0x5555557f1aec,Symbol(exe='./mpv/build/mpv', func='demux_open', addr='0x29daec', loc=[('/root/mpv/demux/demux.c', 3449, 'demux_open'), ('/root/mpv/demux/demux.c', 3510, 'demux_open_url')])
+0x5555559e6b71,Symbol(exe='./mpv/build/mpv', func='open_demux_thread', addr='0x492b71', loc=[('/root/mpv/player/loadfile.c', 1055, 'open_demux_thread')])
+0x7ffff5e10b43,Symbol(exe='/lib/x86_64-linux-gnu/libc.so.6', func='??', addr='0x94b43', loc=[('??', 0, '??')])
+0x7ffff5ea1bb4,Symbol(exe='/lib/x86_64-linux-gnu/libc.so.6', func='clone', addr='0x44', loc=[])
+
+V: 00:00:00 / 00:00:04 (0%)
+
+V: 00:00:00 / 00:00:04 (4%)
+
+V: 00:00:00 / 00:00:04 (8%)
+
+V: 00:00:00 / 00:00:04 (12%)
+
+V: 00:00:00 / 00:00:05 (15%)
+
+V: 00:00:01 / 00:00:05 (19%)
+
+V: 00:00:01 / 00:00:05 (22%)
+
+V: 00:00:01 / 00:00:05 (25%)
+
+V: 00:00:01 / 00:00:05 (27%)
+
+V: 00:00:01 / 00:00:06 (29%)
+
+V: 00:00:02 / 00:00:06 (32%)
+
+V: 00:00:02 / 00:00:06 (34%)
+
+V: 00:00:02 / 00:00:06 (36%)
+
+V: 00:00:02 / 00:00:06 (38%)
+
+V: 00:00:02 / 00:00:07 (39%)
+
+V: 00:00:03 / 00:00:07 (42%)
+
+V: 00:00:03 / 00:00:07 (43%)
+
+V: 00:00:03 / 00:00:07 (44%)
+
+V: 00:00:03 / 00:00:07 (46%)
+
+V: 00:00:03 / 00:00:08 (47%)
+
+V: 00:00:04 / 00:00:08 (49%)
+
+V: 00:00:04 / 00:00:08 (51%)
+
+V: 00:00:04 / 00:00:08 (53%)
+
+V: 00:00:04 / 00:00:08 (56%)
+
+V: 00:00:04 / 00:00:08 (58%)
+
+V: 00:00:05 / 00:00:08 (61%)
+
+V: 00:00:05 / 00:00:08 (63%)
+
+V: 00:00:05 / 00:00:08 (66%)
+
+V: 00:00:05 / 00:00:08 (68%)
+
+V: 00:00:05 / 00:00:08 (70%)
+
+V: 00:00:06 / 00:00:08 (73%)
+
+V: 00:00:06 / 00:00:08 (76%)
+
+V: 00:00:06 / 00:00:08 (78%)
+
+V: 00:00:06 / 00:00:08 (80%)
+
+V: 00:00:06 / 00:00:08 (82%)
+
+V: 00:00:07 / 00:00:08 (86%)
+
+V: 00:00:07 / 00:00:08 (88%)
+
+V: 00:00:07 / 00:00:08 (90%)
+
+V: 00:00:07 / 00:00:08 (92%)
+
+V: 00:00:07 / 00:00:08 (94%)
+
+V: 00:00:08 / 00:00:08 (98%)
+
+=================================================================
+==88460==ERROR: LeakSanitizer: detected memory leaks
+
+Direct leak of 1504 byte(s) in 1 object(s) allocated from:
+    #0 0x5555557282d7 in posix_memalign (/root/mpv/build/mpv+0x1d42d7) (BuildId: ef93435de788fcd7cd3c5e5cc0cf5102a0f0040f)
+    #1 0x7ffff61ca9e4 in av_malloc (/lib/x86_64-linux-gnu/libavutil.so.56+0x419e4) (BuildId: abc6b699a880017e212d717fb86a1c6ea0e022e8)
+    #2 0x5555558121bd in open_given_type /root/mpv/build/../demux/demux.c:3337:15
+    #3 0x5555557f1aeb in demux_open /root/mpv/build/../demux/demux.c:3449:27
+    #4 0x5555557f1aeb in demux_open_url /root/mpv/build/../demux/demux.c:3510:25
+    #5 0x5555559e6b70 in open_demux_thread /root/mpv/build/../player/loadfile.c:1054:9
+    #6 0x7ffff5e10b42  (/lib/x86_64-linux-gnu/libc.so.6+0x94b42) (BuildId: 69389d485a9793dbe873f0ea2c93e02efaa9aa3d)
+
+Indirect leak of 176 byte(s) in 2 object(s) allocated from:
+    #0 0x5555557282d7 in posix_memalign (/root/mpv/build/mpv+0x1d42d7) (BuildId: ef93435de788fcd7cd3c5e5cc0cf5102a0f0040f)
+    #1 0x7ffff61ca9e4 in av_malloc (/lib/x86_64-linux-gnu/libavutil.so.56+0x419e4) (BuildId: abc6b699a880017e212d717fb86a1c6ea0e022e8)
+
+Indirect leak of 152 byte(s) in 1 object(s) allocated from:
+    #0 0x5555557282d7 in posix_memalign (/root/mpv/build/mpv+0x1d42d7) (BuildId: ef93435de788fcd7cd3c5e5cc0cf5102a0f0040f)
+    #1 0x7ffff61ca9e4 in av_malloc (/lib/x86_64-linux-gnu/libavutil.so.56+0x419e4) (BuildId: abc6b699a880017e212d717fb86a1c6ea0e022e8)
+    #2 0x5555558121bd in open_given_type /root/mpv/build/../demux/demux.c:3337:15
+    #3 0x5555557f1aeb in demux_open /root/mpv/build/../demux/demux.c:3449:27
+    #4 0x5555557f1aeb in demux_open_url /root/mpv/build/../demux/demux.c:3510:25
+    #5 0x5555559e6b70 in open_demux_thread /root/mpv/build/../player/loadfile.c:1054:9
+    #6 0x7ffff5e10b42  (/lib/x86_64-linux-gnu/libc.so.6+0x94b42) (BuildId: 69389d485a9793dbe873f0ea2c93e02efaa9aa3d)
+
+Indirect leak of 3 byte(s) in 1 object(s) allocated from:
+    #0 0x555555727b86 in __interceptor_realloc (/root/mpv/build/mpv+0x1d3b86) (BuildId: ef93435de788fcd7cd3c5e5cc0cf5102a0f0040f)
+    #1 0x7ffff61caf38 in av_strdup (/lib/x86_64-linux-gnu/libavutil.so.56+0x41f38) (BuildId: abc6b699a880017e212d717fb86a1c6ea0e022e8)
+
+SUMMARY: AddressSanitizer: 1835 byte(s) leaked in 5 allocation(s).
