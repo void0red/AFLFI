@@ -328,7 +328,7 @@ u8 *describe_op(afl_state_t *afl, u8 new_bits, size_t max_description_len) {
       size_t len_current = strlen(ret);
       len_current += sprintf(ret + len_current, ",fault:");
       for (u32 i = 0; i < ctl->fail_size; ++i) {
-        len_current += sprintf(ret + len_current, "%d,", ctl->fails[i]);
+        len_current += sprintf(ret + len_current, "%lu,", ctl->fail_addr[i]);
       }
       ret[len_current-1] = '\0';
     }

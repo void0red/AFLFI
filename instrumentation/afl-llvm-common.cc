@@ -626,15 +626,26 @@ void InstPlugin::runOnModule(llvm::Module &M) {
 
   if (errorLocs.empty() && errorFuncs.empty()) return;
 
+  fifuzz = getenv("FJ_FIFUZZ") != nullptr;
+
   IRBuilder<> IRB(M.getContext());
-  FaultInjectionControlFunc = M.getOrInsertFunction(
-      FaultInjectionControlName, IRB.getInt1Ty(), IRB.getVoidTy());
-  FaultInjectionDistanceFunc = M.getOrInsertFunction(
-      FaultInjectionDistanceName, IRB.getVoidTy(), IRB.getInt32Ty());
+  if (!fifuzz) {
+    FaultInjectionControlFunc = M.getOrInsertFunction(
+        FaultInjectionControlName, IRB.getInt1Ty(), IRB.getVoidTy());
+  } else {
+    FaultInjectionControlFunc = M.getOrInsertFunction(
+        FaultInjectionControlName, IRB.getInt1Ty(), IRB.getInt64Ty());
+    FaultInjectionTraceFunc = M.getOrInsertFunction(
+        FaultInjectionTraceName, IRB.getVoidTy(), IRB.getInt64Ty());
+  }
+
   noSanitizeKindId = M.getMDKindID("nosanitize");
   noSanitizeNode = MDNode::get(M.getContext(), None);
 
   CollectInsertPoint(&M);
+
+  if (fifuzz) InsertTrace(&M);
+
   InsertControl(&M);
 }
 
@@ -657,19 +668,33 @@ void InstPlugin::CollectInsertPoint(llvm::Module *m) {
   for (auto &func : m->functions()) {
     int counter = 0;
     if (func.empty() || func.isIntrinsic() || isIgnoreFunction(&func)) continue;
+
+    auto *entry = &*func.getEntryBlock().getFirstInsertionPt();
     for (auto &inst : instructions(func)) {
+      auto *retInst = dyn_cast<ReturnInst>(&inst);
+      if (fifuzz && retInst) {
+        entryExit[entry].insert(retInst);
+        continue;
+      }
+
       auto *callInst = dyn_cast<CallInst>(&inst);
       if (!callInst) continue;
+
       auto *callee =
           dyn_cast<Function>(callInst->getCalledOperand()->stripPointerCasts());
       if (!callee || callee->isIntrinsic() || !callee->hasName() ||
-          isIgnoreFunction(callee) || !callee->getReturnType()->isIntOrPtrTy())
+          isIgnoreFunction(callee))
         continue;
+
+      if (fifuzz) callSite.insert(callInst);
+
+      if (!callee->getReturnType()->isIntOrPtrTy()) continue;
 
       auto fn = callee->getName().split('.').first.str();
 
       if (errorFuncs.find(fn) != errorFuncs.end()) {
         errorSite[callInst] = counter++;
+        callSite.erase(callInst);
         continue;
       }
 
@@ -678,6 +703,7 @@ void InstPlugin::CollectInsertPoint(llvm::Module *m) {
 
       if (errorLocs.count(getLocHash(callInst))) {
         errorSite[callInst] = counter++;
+        callSite.erase(callInst);
       }
     }
   }
@@ -695,8 +721,15 @@ void InstPlugin::InsertControl(llvm::Module *m) {
       zero = ConstantInt::get(retType, -1, true);
 
     IRB.SetInsertPoint(es);
+    CallInst *check;
+    if (!fifuzz) {
+      check = IRB.CreateCall(FaultInjectionControlFunc);
+    } else {
+      check = IRB.CreateCall(
+          FaultInjectionControlFunc,
+          IRB.getInt64(getInsertID(es, InsertType::ErrorCollect)));
+    }
 
-    auto check = IRB.CreateCall(FaultInjectionControlFunc);
     setNoSanitize(check);
     auto cmp = IRB.CreateICmpEQ(check, IRB.getInt1(false));
     setNoSanitize(cast<CmpInst>(cmp));
@@ -714,6 +747,53 @@ void InstPlugin::InsertControl(llvm::Module *m) {
 
     phi->addIncoming(es, thenTerm->getParent());
     phi->addIncoming(zero, check->getParent());
+  }
+}
+
+uint64_t InstPlugin::getInsertID(llvm::Instruction     *inst,
+                                 InstPlugin::InsertType ty) {
+  auto *Func = inst->getParent();
+  auto  ret = llvm::hash_combine(llvm::hash_value(Func->getName()));
+  if (DILocation *Loc = inst->getDebugLoc()) {
+    StringRef Dir = Loc->getDirectory();
+    StringRef File = Loc->getFilename();
+    unsigned  Line = Loc->getLine();
+    ret = llvm::hash_combine(ret, llvm::hash_value(Dir), llvm::hash_value(File),
+                             llvm::hash_value(Line));
+  }
+  return (static_cast<uint64_t>(ty) << 56) | (ret >> 8);
+}
+
+void InstPlugin::InsertTrace(llvm::Module *m) {
+  IRBuilder<> IRB(m->getContext());
+  for (const auto &pair : entryExit) {
+    IRB.SetInsertPoint(pair.first);
+    auto v = getInsertID(pair.first, InsertType::FuncEntry);
+    auto call = IRB.CreateCall(FaultInjectionTraceFunc, IRB.getInt64(v));
+    setNoSanitize(call);
+
+    for (const auto et : pair.second) {
+      IRB.SetInsertPoint(et);
+      auto call2 = IRB.CreateCall(
+          FaultInjectionTraceFunc,
+          IRB.getInt64((static_cast<uint64_t>(InsertType::FuncExit) << 56) |
+                       (v >> 8)));
+      setNoSanitize(call2);
+    }
+  }
+
+  for (const auto cs : callSite) {
+    IRB.SetInsertPoint(cs);
+    auto v = getInsertID(cs, InsertType::CallEntry);
+    auto call = IRB.CreateCall(FaultInjectionTraceFunc, IRB.getInt64(v));
+    setNoSanitize(call);
+
+    IRB.SetInsertPoint(cs->getNextNode());
+    auto call2 = IRB.CreateCall(
+        FaultInjectionTraceFunc,
+        IRB.getInt64((static_cast<uint64_t>(InsertType::CallExit) << 56) |
+                     (v >> 8)));
+    setNoSanitize(call2);
   }
 }
 

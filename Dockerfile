@@ -63,10 +63,9 @@ RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-${GCC_VERSION} 0
     update-alternatives --install /usr/bin/clang clang /usr/bin/clang-${LLVM_VERSION} 0 && \
     update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-${LLVM_VERSION} 0 && \
     update-alternatives --install /usr/bin/llvm-addr2line llvm-addr2line /usr/bin/llvm-addr2line-${LLVM_VERSION} 0 && \
-    update-alternatives --install /usr/bin/llvm-config llvm-config /usr/bin/llvm-config-${LLVM_VERSION} 0
+    update-alternatives --install /usr/bin/llvm-config llvm-config /usr/bin/llvm-config-${LLVM_VERSION} 0 && \
+    update-alternatives --install /usr/bin/llvm-link llvm-link /usr/bin/llvm-link-${LLVM_VERSION} 0
 
-RUN wget -qO- https://sh.rustup.rs | CARGO_HOME=/etc/cargo sh -s -- -y -q --no-modify-path
-ENV PATH=$PATH:/etc/cargo/bin
 
 RUN apt clean -y
 
@@ -84,13 +83,6 @@ COPY . .
 ARG CC=gcc-$GCC_VERSION
 ARG CXX=g++-$GCC_VERSION
 
-# Used in CI to prevent a 'make clean' which would remove the binaries to be tested
-#ARG TEST_BUILD
-#
-#RUN sed -i.bak 's/^	-/	/g' GNUmakefile && \
-#    make clean && make distrib && \
-#    ([ "${TEST_BUILD}" ] || (make install && make clean)) && \
-#    mv GNUmakefile.bak GNUmakefile
 RUN make clean && make -j
 
 RUN echo "set encoding=utf-8" > /root/.vimrc && \

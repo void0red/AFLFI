@@ -32,7 +32,7 @@ typedef struct ctl_block {
   uint32_t disable_size;
   uint32_t trace_size;
 
-  uint32_t fails[MAX_FAIL_SIZE];
+  uint64_t fail_addr[MAX_FAIL_SIZE];
   uint64_t enable_addr[MAX_ENABLE_SIZE];
   uint64_t disable_addr[MAX_DISABLE_SIZE];
   uint64_t trace_addr[0];

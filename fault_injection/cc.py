@@ -14,6 +14,8 @@ def get_bc_name(old, link=False):
     return old + '.bc'
 
 
+ignore_file_ext = ['.s', '.S', '.bc']
+
 def handle_bitcode_mode(l: list):
     logging.debug('recv: ' + ' '.join(l))
 
@@ -26,8 +28,7 @@ def handle_bitcode_mode(l: list):
         compile_mode = True
     if '-o' in l:
         outfile_idx = l.index('-o') + 1
-        # skip asm
-        if l[outfile_idx].endswith('.s') or l[outfile_idx].endswith('.S'):
+        if any([l[outfile_idx].endswith(i) for i in ignore_file_ext]):
             return fixed_args
     if '-' in l:
         # it will read from stdin as input later, so we skip it
@@ -35,9 +36,9 @@ def handle_bitcode_mode(l: list):
     if l[-1].endswith('.s') or l[-1].endswith('.S'):
         return fixed_args
 
-    multi_objs = [v for i, v in enumerate(l) if v.endswith('.o') and i != outfile_idx]
+    multi_objs = [v for i, v in enumerate(l) if i != outfile_idx and (v.endswith('.o') or v.endswith('.bc'))]
 
-    if len(multi_objs) > 0:
+    if len(multi_objs) > 0 or '-shared' in l:
         link_mode = True
 
     if compile_mode:
@@ -80,15 +81,15 @@ if __name__ == '__main__':
 
     env = os.environ
 
-    if env.get('HOOK_RAW'):
+    if env.get('FJ_FUNC') or \
+        env.get('FJ_LOC') or \
+        env.get('FJ_DIS') or \
+        env.get('AFL_USE_ASAN') or \
+        env.get('AFL_USE_UBSAN'):
+        new_args = handle_afl_mode(sys.argv)
+    elif env.get('HOOK_RAW'):
         new_args = ['clang'] + sys.argv[1:]
         logging.info(' '.join(new_args))
-    elif env.get('FJ_FUNC') or \
-            env.get('FJ_LOC') or \
-            env.get('FJ_DIS') or \
-            env.get('AFL_USE_ASAN') or \
-            env.get('AFL_USE_UBSAN'):
-        new_args = handle_afl_mode(sys.argv)
     else:
         new_args = handle_bitcode_mode(sys.argv)
 

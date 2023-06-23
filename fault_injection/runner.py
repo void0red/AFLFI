@@ -14,15 +14,15 @@ import time
 
 
 # typedef struct ctl_block {
-# uint32_t on;
+# int32_t on;
 # uint32_t hit;
-
+#
 # uint32_t fail_size;
 # uint32_t enable_size;
 # uint32_t disable_size;
 # uint32_t trace_size;
 #
-# uint32_t fails[MAX_FAIL_SIZE];
+# uint64_t fail_addr[MAX_FAIL_SIZE];
 # uint64_t enable_addr[MAX_ENABLE_SIZE];
 # uint64_t disable_addr[MAX_DISABLE_SIZE];
 # uint64_t trace_addr[0];
@@ -36,7 +36,7 @@ class CtlBlock(ctypes.Structure):
                 ('enable_size', ctypes.c_uint32),
                 ('disable_size', ctypes.c_uint32),
                 ('trace_size', ctypes.c_uint32),
-                ('fails', ctypes.c_uint32 * 16),
+                ('fails', ctypes.c_uint64 * 16),
                 ('enable_addr', ctypes.c_uint64 * 32),
                 ('disable_addr', ctypes.c_uint64 * 128),
                 ('trace_addr', ctypes.c_uint64)]
@@ -47,20 +47,59 @@ class CtlBlock(ctypes.Structure):
 
 @dataclass
 class Symbol:
-    exe: str
     func: str
-    addr: str
+    off: str
     loc: list
+    need_reslove: bool = field(init=False, default=False)
+
+    def __eq__(self, other):
+        if not isinstance(other, self.__class__):
+            return False
+        if self.func != other.func:
+            return False
+        if self.off and other.off and self.off != other.off:
+            return False
+        if self.loc and other.loc:
+            if self.loc[0] != other.loc[0]:
+                return False
+        return True
 
 
 @dataclass
-class ErrorPoint:
-    addr: str
-    stack: [Symbol] = field(repr=False)
+class TraceStack:
+    frame: [Symbol]
+
+    def __eq__(self, other):
+        if not isinstance(other, self.__class__):
+            return False
+        if len(self.frame) != len(other.frame):
+            return False
+        for i in range(len(self.frame)):
+            if self.frame[i] != other.frame[i]:
+                return False
+        return True
+
+    def __in(self, other: Symbol):
+        for i in self.frame:
+            if i == other:
+                return True
+        return False
+
+    def __contains__(self, item):
+        if isinstance(item, Symbol):
+            return self.__in(item)
+        elif isinstance(item, self.__class__):
+            if all([self.__in(i) for i in item.frame]):
+                return True
+            return False
+        else:
+            return False
+
+    def __len__(self):
+        return len(self.frame)
 
 
 class Symbolizer:
-    head_pattern = re.compile(r'^failth (\d+), addr (.+?)$')
     stack_pattern = re.compile(r'^(.+?),(.+?)\((.+?)?\+(.+?)\) \[(.+?)]$')
     pending_threshold = 1000
 
@@ -68,71 +107,22 @@ class Symbolizer:
         self.pending = {}
         self.cache = {}
 
-    def symbolify(self, text: str) -> str:
-        ret = []
-        for line in text.splitlines():
-            r = re.search(self.stack_pattern, line)
-            if r:
-                addr1, exe, func, pos, addr2 = r.groups()
-                assert addr1 == addr2
-                if func:
-                    s = Symbol(exe, func, pos, [])
-                    ret.append(f'{addr1},{s}')
-                else:
-                    s = self.__lazy_cache(exe, pos)
-                    if isinstance(s, Symbol):
-                        ret.append(f'{addr1},{s}')
-                    else:
-                        ret.append((addr1, exe, pos))
+    def process(self, text: str):
+        frames = []
+        for i in re.finditer(self.stack_pattern, line):
+            addr1, exe, func, pos, addr2 = r.groups()
+            assert addr1 == addr2
+            if func:
+                s = Symbol(func, pos, [])
+                frames.append(s)
             else:
-                ret.append(line)
+                s = self.__lazy_cache(exe, pos)
+                frames.append(s)
         self.__check_done()
-        for i, v in enumerate(ret):
-            if not isinstance(v, str):
-                s = self.__lazy_cache(v[1], v[2])
-                assert isinstance(s, Symbol)
-                ret[i] = f'{v[0]},{s}'
-        return '\n'.join(ret)
-
-    # def process(self, text: str):
-    #     failth, addr = 0, ''
-    #     for line in text.splitlines():
-    #         head = re.search(self.head_pattern, line)
-    #         if head:
-    #             failth, addr = int(head.group(1)), head.group(2)
-    #             self.addrs.append(addr)
-    #             continue
-    #         stack = re.search(self.stack_pattern, line)
-    #         if stack:
-    #             res = stack.groups()
-    #             addr1, exe, func, pos, addr2 = res
-    #             assert addr1 == addr2
-    #             self.stack.append((addr, exe, func, pos))
-    #             if not func:
-    #                 self.lazy_cache(exe, pos)
-    #
-    #     for k, v in self.pending.items():
-    #         self.resolve(k, v)
-    #     self.pending.clear()
-    #
-    #     # finally build
-    #     last_addr = None
-    #     symbols = []
-    #     for (addr, exe, func, pos) in self.stack:
-    #         if addr != last_addr:
-    #             if last_addr:
-    #                 self.eps.append(ErrorPoint(last_addr, symbols.copy()))
-    #                 symbols.clear()
-    #         last_addr = addr
-    #
-    #         if not func:
-    #             symbols.append(self.cache[(exe, pos)])
-    #         else:
-    #             s = Symbol(exe, pos, [])
-    #             s.func = func
-    #             symbols.append(s)
-    #
-    #     self.eps.append(ErrorPoint(last_addr, symbols.copy()))
+        for i, v in enumerate(frames):
+            if v.need_reslove:
+                frames[i] = self.cache[(v.func, v.off)]
+        return TraceStack(frames)
 
     def __lazy_cache(self, exe: str, addr: str):
         ret = self.cache.get((exe, addr))
@@ -141,7 +131,8 @@ class Symbolizer:
         self.pending.setdefault(exe, []).append(addr)
         if len(self.pending[exe]) > self.pending_threshold:
             self.resolve(exe, self.pending.pop(exe))
-        return exe, addr
+            return self.cache[(exe, addr)]
+        return Symbol(exe, addr, [], True)
 
     def __check_done(self):
         for k, v in self.pending.items():
@@ -154,11 +145,12 @@ class Symbolizer:
         last_addr = None
         current_locs = []
         current_func = None
+        ret = {}
 
         for line in r.stdout.decode().splitlines():
             if line in addrs:
                 if last_addr:
-                    self.cache[(exe, last_addr)] = Symbol(exe, current_locs[0][-1], last_addr, current_locs.copy())
+                    ret[(exe, last_addr)] = Symbol(current_locs[0][-1], last_addr, current_locs.copy())
                     current_locs.clear()
                 last_addr = line
                 continue
@@ -173,30 +165,98 @@ class Symbolizer:
             current_func = None
 
             # remember to handle last one
-            self.cache[(exe, last_addr)] = Symbol(exe, current_locs[0][-1], last_addr, current_locs.copy())
+            ret[(exe, last_addr)] = Symbol(current_locs[0][-1], last_addr, current_locs.copy())
+
+        self.cache.update(ret)
+        return ret
 
 
 class CrashAnalyzer:
-    pass
+    frame_pattern = re.compile(r"^\s+#(\d+) \S* in (\S+) (\S+)", re.MULTILINE)
+
+    def __init__(self):
+        self.LeakSanitizer: [TraceStack] = []
+        self.AddressSanitizer: [TraceStack] = []
+        self.UndefinedBehaviorSanitizer: [TraceStack] = []
+
+    def process(self, text: str):
+        trace = self.do_parse(text)
+        if not trace:
+            return False
+        if 'LeakSanitizer: detected memory leaks' in text:
+            return self.__add_to_list(self.LeakSanitizer, trace), trace
+        elif 'AddressSanitizer' in text:
+            return self.__add_to_list(self.AddressSanitizer, trace), trace
+        elif 'UndefinedBehaviorSanitizer' in text:
+            return self.__add_to_list(self.UndefinedBehaviorSanitizer, trace), trace
+        else:
+            assert text
+
+    @staticmethod
+    def __add_to_list(l:[TraceStack], o: TraceStack):
+        for i, v in enumerate(l):
+            if o == v:
+                return False
+            if o in v:
+                return False
+            if v in o:
+                l[i] = o
+                return False
+        l.append(o)
+        return True
+    
+    def do_parse(self, text: str) -> [TraceStack]:
+        trace = []
+        frames = []
+        for i in re.finditer(self.frame_pattern, text):
+            idx, func, info = i.groups()
+            idx = int(idx)
+            if idx < len(frames):
+                t = TraceStack(frames.copy())
+                self.__add_to_list(trace, t)
+                frames.clear()
+            info = info.removeprefix('(').removesuffix(')')
+            if '+' in info:
+                exe, off = info.split('+')
+                s = Symbol(func, off, [])
+            else:
+                p, lno, rno = info.split(':')
+                s = Symbol(func, '', [str(Path(p).resolve()), int(lno), func])
+            frames.append(s)
+
+        if frames:
+            t = TraceStack(frames.copy())
+            self.__add_to_list(trace, t)
+        return trace
 
 
 class Monitor:
-    SYM = Symbolizer()
-
-    def __init__(self, text: str = None):
-        self.raw = text
+    Symbolizer_ = Symbolizer()
+    CrashAnalyzer_ = CrashAnalyzer()
+    
+    def __init__(self, cmd:str, text: str = None):
         logging.debug(text)
-
-    def bug(self):
-        if 'LeakSanitizer' in self.raw or \
-                'AddressSanitizer' in self.raw:
-            return True
-        return False
+        self.cmd = cmd
+        self.raw = text
+    
+    def process(self, fn) -> bool:
+        ep = self.Symbolizer_.process(self.raw)
+        need_save, trace = self.CrashAnalyzer_.process(self.raw)
+        if not need_save:
+            return False
+        # do simple filter here
+        with open(fn, 'w') as f:
+            f.write(self.cmd + '\n')
+            f.write(self.raw + '\n')
+            f.write('Inject Error Stack:\n' + str(ep) + '\n')
+            f.write('\n'.join(trace))
+        return True
+        
 
     def dump(self, cmd, fn):
         with open(fn, 'w') as f:
             f.write(cmd + '\n')
-            f.write(self.SYM.symbolify(self.raw))
+            f.write(self.ep)
 
 
 class Runner:
@@ -213,25 +273,25 @@ class Runner:
         self.env = os.environ.copy()
         self.env.update(AFL_DEBUG='1', FJ_SHM_ID=self.shm_name, FJ_SHM_SIZE=str(self.shm_size))
 
-    def __set_ctl_block(self, *args, **kwargs):
+    def set_ctl_block(self, *args, **kwargs):
         b = bytes(CtlBlock(*args, **kwargs))
         self.shm.buf[:len(b)] = b
 
-    def __read_ctl_block(self) -> CtlBlock:
+    def read_ctl_block(self) -> CtlBlock:
         b = CtlBlock.from_buffer_copy(self.shm.buf)
         return b
 
     async def __execute(self, *args, **kwargs) -> [CtlBlock, Monitor]:
-        self.__set_ctl_block(*args, **kwargs)
+        self.set_ctl_block(*args, **kwargs)
         r = await asyncio.create_subprocess_exec(self.exe, *self.args,
                                                  stdout=subprocess.DEVNULL,
                                                  stderr=subprocess.PIPE,
                                                  env=self.env)
         err = await r.stderr.read()
-        return self.__read_ctl_block(), Monitor(err.decode())
+        return self.read_ctl_block(), Monitor(' '.join(self.cmd), err.decode())
 
     async def run_one(self, failth) -> [CtlBlock, Monitor]:
-        ctl, mon = await self.__execute(on=2, fail_size=1, fails=(ctypes.c_uint32 * 16)(failth, ))
+        ctl, mon = await self.__execute(on=2, fail_size=1, fails=(ctypes.c_uint64 * 16)(failth, ))
         logging.debug(f'runner {self.id} fail on {failth}, hit {ctl.hit} errors')
         return ctl, mon
 
@@ -254,21 +314,23 @@ class RunnerPool:
         for i in range(n):
             self.runners.put_nowait(Runner(cmd, i, debug))
 
-        self.counter = 0
+        self.finished = 0
         self.total = 0
+        self.crashes = 0
+        
 
     async def run_one(self, i):
         inst: Runner = await self.runners.get()
         try:
             ctl, mon = await asyncio.wait_for(inst.run_one(i), 60)
-            if mon.bug():
-                mon.dump(self.cmd,
-                         f'{self.name},runner:{inst.id},{ctl.get_fails()}.log')
+            saved = mon.process(f'{self.name},runner:{inst.id},{ctl.get_fails()}.log')
+            if saved:
+                self.crashes += 1
         except asyncio.TimeoutError:
-            logging.warning(f'runner {inst.id} timeout')
+            logging.warning(f'runner {inst.id} timeout, {inst.read_ctl_block().get_fails()}')
         self.runners.put_nowait(inst)
-        self.counter += 1
-        print(f'task done {self.counter}/{self.total}', end='\r')
+        self.finished += 1
+        print(f'task done {self.finished}/{self.total}, crashes {self.crashes}', end='\r')
 
     async def loop(self):
         inst: Runner = await self.runners.get()
@@ -303,4 +365,6 @@ if __name__ == '__main__':
     elif parm.failth:
         asyncio.run(Runner(parm.exe, parm.debug).run_one(parm.failth))
     elif parm.thread:
+        start = time.time()
         asyncio.run(RunnerPool(parm.exe, os.cpu_count(), parm.debug).loop())
+        logging.info(f'cost {time.time() - start}s')

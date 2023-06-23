@@ -5,7 +5,6 @@ extern "C" {
 #endif
 #include "../fault_injection/common.h"
 
-struct FailSeq;
 struct Manager;
 struct Manager *fj_init(uint8_t *id);
 ctl_block_t    *fj_getctl(struct Manager *mgr);

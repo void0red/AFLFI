@@ -74,10 +74,21 @@ IS_EXTERN int be_quiet;
 class InstPlugin {
  private:
   const char *FaultInjectionControlName = "__fault_injection_control";
+  const char *FaultInjectionTraceName = "__fault_injection_trace";
   const char *FaultInjectionDistanceName = "__fault_injection_distance";
 
   llvm::FunctionCallee FaultInjectionControlFunc;
+  llvm::FunctionCallee FaultInjectionTraceFunc;
   llvm::FunctionCallee FaultInjectionDistanceFunc;
+
+  bool fifuzz{false};
+  enum class InsertType {
+    FuncEntry = 0xE0,
+    FuncExit = 0xE1,
+    CallEntry = 0xE2,
+    CallExit = 0xE3,
+    ErrorCollect = 0xE4,
+  };
 
   unsigned           noSanitizeKindId{0};
   llvm::MDNode      *noSanitizeNode{nullptr};
@@ -92,14 +103,22 @@ class InstPlugin {
   bool loadDistance(const char *name);
 
   std::unordered_map<llvm::CallInst *, uint32_t> errorSite;
+  std::unordered_set<llvm::CallInst *>           callSite;
+  std::unordered_map<llvm::Instruction *,
+                     std::unordered_set<llvm::Instruction *>>
+      entryExit;
 
   void CollectInsertPoint(llvm::Module *m);
 
   void InsertControl(llvm::Module *m);
 
+  void InsertTrace(llvm::Module *m);
+
   void InsertDistance(llvm::Module *m);
 
-  static llvm::hash_code getLocHash(llvm::CallInst* callInst);
+  static llvm::hash_code getLocHash(llvm::CallInst *callInst);
+
+  static uint64_t getInsertID(llvm::Instruction *inst, InsertType ty);
 
  public:
   void runOnModule(llvm::Module &M);

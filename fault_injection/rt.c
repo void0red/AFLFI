@@ -12,13 +12,14 @@
 #include <threads.h>
 
 #define XXH_INLINE_ALL
-#include "xxhash.h"
+#include "../include/xxhash.h"
 #undef XXH_INLINE_ALL
 
 static struct ctl_block *cb;
 static bool              __init_done = false;
 static bool              __afl_debug = false;
 static size_t            shm_size = FJ_SHM_DEFAULT_SIZE;
+static bool              have_fault = false;
 
 __attribute__((destructor)) void __fault_injection_finit() {
   if (!__init_done || !cb) return;
@@ -86,7 +87,7 @@ static inline void do_log(uint64_t addr) {
 }
 
 bool __fault_injection_control() {
-  if (!__init_done || !cb || !cb->on) return false;
+  if (!__init_done || !cb->on) return false;
   uint64_t addr = (uint64_t)__builtin_return_address(0);
   cb->hit++;
   if (cb->on == 1) {
@@ -100,17 +101,21 @@ bool __fault_injection_control() {
 
   for (uint32_t i = 0; i < cb->enable_size; ++i) {
     if (addr == cb->enable_addr[i]) {
+      have_fault = true;
       do_log(addr);
       return true;
     }
   }
 
   for (uint32_t i = 0; i < cb->fail_size; ++i) {
-    if (cb->hit == cb->fails[i]) {
+    if (cb->hit == cb->fail_addr[i]) {
+      have_fault = true;
       do_log(addr);
       return true;
     }
   }
+
+  if (have_fault) do_log(addr);
 
   return false;
 }
