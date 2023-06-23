@@ -115,7 +115,7 @@ bool __fault_injection_control() {
     }
   }
 
-  if (have_fault) do_log(addr);
+  if (!__afl_debug && have_fault) do_log(addr);
 
   return false;
 }

@@ -50,7 +50,7 @@ class Symbol:
     func: str
     off: str
     loc: list
-    need_reslove: bool = field(init=False, default=False)
+    need_reslove: bool = field(default=False, repr=False)
 
     def __eq__(self, other):
         if not isinstance(other, self.__class__):
@@ -100,7 +100,7 @@ class TraceStack:
 
 
 class Symbolizer:
-    stack_pattern = re.compile(r'^(.+?),(.+?)\((.+?)?\+(.+?)\) \[(.+?)]$')
+    stack_pattern = re.compile(r'^(.+?),(.+?)\((.+?)?\+(.+?)\) \[(.+?)]$', re.MULTILINE)
     pending_threshold = 1000
 
     def __init__(self):
@@ -109,14 +109,14 @@ class Symbolizer:
 
     def process(self, text: str):
         frames = []
-        for i in re.finditer(self.stack_pattern, line):
-            addr1, exe, func, pos, addr2 = r.groups()
+        for i in re.finditer(self.stack_pattern, text):
+            addr1, exe, func, off, addr2 = i.groups()
             assert addr1 == addr2
             if func:
-                s = Symbol(func, pos, [])
+                s = Symbol(func, off, [])
                 frames.append(s)
             else:
-                s = self.__lazy_cache(exe, pos)
+                s = self.__lazy_cache(exe, off)
                 frames.append(s)
         self.__check_done()
         for i, v in enumerate(frames):
@@ -124,15 +124,15 @@ class Symbolizer:
                 frames[i] = self.cache[(v.func, v.off)]
         return TraceStack(frames)
 
-    def __lazy_cache(self, exe: str, addr: str):
-        ret = self.cache.get((exe, addr))
+    def __lazy_cache(self, exe: str, off: str):
+        ret = self.cache.get((exe, off))
         if ret:
             return ret
-        self.pending.setdefault(exe, []).append(addr)
+        self.pending.setdefault(exe, []).append(off)
         if len(self.pending[exe]) > self.pending_threshold:
             self.resolve(exe, self.pending.pop(exe))
-            return self.cache[(exe, addr)]
-        return Symbol(exe, addr, [], True)
+            return self.cache[(exe, off)]
+        return Symbol(exe, off, [], True)
 
     def __check_done(self):
         for k, v in self.pending.items():
@@ -182,7 +182,7 @@ class CrashAnalyzer:
     def process(self, text: str):
         trace = self.do_parse(text)
         if not trace:
-            return False
+            return False, None
         if 'LeakSanitizer: detected memory leaks' in text:
             return self.__add_to_list(self.LeakSanitizer, trace), trace
         elif 'AddressSanitizer' in text:
@@ -193,7 +193,7 @@ class CrashAnalyzer:
             assert text
 
     @staticmethod
-    def __add_to_list(l:[TraceStack], o: TraceStack):
+    def __add_to_list(l:[TraceStack], o: TraceStack) -> bool:
         for i, v in enumerate(l):
             if o == v:
                 return False
@@ -238,18 +238,18 @@ class Monitor:
         logging.debug(text)
         self.cmd = cmd
         self.raw = text
-    
+
     def process(self, fn) -> bool:
-        ep = self.Symbolizer_.process(self.raw)
         need_save, trace = self.CrashAnalyzer_.process(self.raw)
         if not need_save:
             return False
+        ep = self.Symbolizer_.process(self.raw)
         # do simple filter here
         with open(fn, 'w') as f:
             f.write(self.cmd + '\n')
             f.write(self.raw + '\n')
-            f.write('Inject Error Stack:\n' + str(ep) + '\n')
-            f.write('\n'.join(trace))
+            f.write('Inject Error Stack:\n' + str(ep) + '\nSanitizer Stack:\n')
+            f.write('\n'.join([str(i) for i in trace]))
         return True
         
 
@@ -317,6 +317,7 @@ class RunnerPool:
         self.finished = 0
         self.total = 0
         self.crashes = 0
+        self.timeout = 0
         
 
     async def run_one(self, i):
@@ -327,10 +328,11 @@ class RunnerPool:
             if saved:
                 self.crashes += 1
         except asyncio.TimeoutError:
-            logging.warning(f'runner {inst.id} timeout, {inst.read_ctl_block().get_fails()}')
+            # logging.warning(f'runner {inst.id} timeout, {inst.read_ctl_block().get_fails()}')
+            self.timeout += 1
         self.runners.put_nowait(inst)
         self.finished += 1
-        print(f'task done {self.finished}/{self.total}, crashes {self.crashes}', end='\r')
+        print(f'task done {self.finished}/{self.total}, timeout {self.timeout}, bug {self.crashes}', end='\r')
 
     async def loop(self):
         inst: Runner = await self.runners.get()
@@ -352,6 +354,15 @@ def get_args():
 
 
 if __name__ == '__main__':
+    import sys
+    with open(sys.argv[1]) as f:
+        data = f.read()
+    _, trace = CrashAnalyzer().process(data)
+    print(*trace[0].frame, sep='\n')
+    print('\n\n')
+    trace2 = Symbolizer().process(data)
+    print(*trace2.frame, sep='\n')
+    exit(0)
     parm = get_args()
     if len(parm.exe) < 1:
         exit(0)
