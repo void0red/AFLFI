@@ -354,15 +354,6 @@ def get_args():
 
 
 if __name__ == '__main__':
-    import sys
-    with open(sys.argv[1]) as f:
-        data = f.read()
-    _, trace = CrashAnalyzer().process(data)
-    print(*trace[0].frame, sep='\n')
-    print('\n\n')
-    trace2 = Symbolizer().process(data)
-    print(*trace2.frame, sep='\n')
-    exit(0)
     parm = get_args()
     if len(parm.exe) < 1:
         exit(0)

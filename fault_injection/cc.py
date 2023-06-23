@@ -54,16 +54,17 @@ def handle_bitcode_mode(l: list):
         else:
             fixed_args = ['clang', '-emit-llvm', '-g'] + l[1:]
     elif link_mode:
-        if outfile_idx > 0:
-            tmp_args = ['llvm-link', '-o', get_bc_name(l[outfile_idx], True)] + [get_bc_name(i) for i in multi_objs]
-            logging.debug(' '.join(tmp_args))
-            try:
-                subprocess.run(tmp_args, env=os.environ, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except Exception as e:
-                logging.info(e)
-        else:
-            # we can't guess the output name
-            pass
+        # if outfile_idx > 0:
+        #     tmp_args = ['llvm-link', '-o', get_bc_name(l[outfile_idx], True)] + [get_bc_name(i) for i in multi_objs]
+        #     logging.debug(' '.join(tmp_args))
+        #     try:
+        #         subprocess.run(tmp_args, env=os.environ, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        #     except Exception as e:
+        #         logging.info(e)
+        # else:
+        #     # we can't guess the output name
+        #     pass
+        pass
     return fixed_args
 
 

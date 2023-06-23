@@ -127,7 +127,7 @@ static cl::opt<std::string> OutputFile("out", cl::Optional,
                                        cl::cat(DefaultCat));
 
 static cl::opt<bool> OnlyLib("onlylib", cl::desc("only focus on lib function"),
-                             cl::cat(DefaultCat));
+                             cl::cat(DefaultCat), cl::init(true));
 
 static cl::opt<bool> hDebug("debug", cl::cat(DefaultCat), cl::Hidden);
 
