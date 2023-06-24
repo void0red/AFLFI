@@ -651,9 +651,16 @@ void InstPlugin::runOnModule(llvm::Module &M) {
 
 hash_code InstPlugin::getLocHash(llvm::CallInst *callInst) {
   auto *Func = callInst->getParent();
-  auto *Callee = callInst->getCalledFunction();
-  auto  ret = llvm::hash_combine(llvm::hash_value(Func->getName()),
-                                 llvm::hash_value(Callee->getName()));
+  auto *Callee = dyn_cast<Function>(callInst->getCalledOperand()->stripPointerCasts());
+  std::string fn, cn;
+  if (Func->hasName()) {
+    fn = Func->getName().str();
+  }
+  if (Callee->hasName()) {
+    cn = Callee->getName().str();
+  }
+  auto  ret = llvm::hash_combine(llvm::hash_value(fn),
+                                 llvm::hash_value(cn));
   if (DILocation *Loc = callInst->getDebugLoc()) {
     StringRef Dir = Loc->getDirectory();
     StringRef File = Loc->getFilename();
