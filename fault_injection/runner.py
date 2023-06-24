@@ -220,7 +220,12 @@ class CrashAnalyzer:
                 exe, off = info.split('+')
                 s = Symbol(func, off, [])
             else:
-                p, lno, rno = info.split(':')
+                p = None
+                lno = 0
+                if ':' in info:
+                    p, lno, _ = info.split(':')
+                else:
+                    p = info.strip()
                 s = Symbol(func, '', [str(Path(p).resolve()), int(lno), func])
             frames.append(s)
 
