@@ -193,7 +193,7 @@ class CrashAnalyzer:
             assert text
 
     @staticmethod
-    def __add_to_list(l:[TraceStack], o: TraceStack) -> bool:
+    def __add_to_list(l: [TraceStack], o: TraceStack) -> bool:
         for i, v in enumerate(l):
             if o == v:
                 return False
@@ -204,7 +204,7 @@ class CrashAnalyzer:
                 return False
         l.append(o)
         return True
-    
+
     def do_parse(self, text: str) -> [TraceStack]:
         trace = []
         frames = []
@@ -238,8 +238,8 @@ class CrashAnalyzer:
 class Monitor:
     Symbolizer_ = Symbolizer()
     CrashAnalyzer_ = CrashAnalyzer()
-    
-    def __init__(self, cmd:str, text: str = None):
+
+    def __init__(self, cmd: str, text: str = None):
         logging.debug(text)
         self.cmd = cmd
         self.raw = text
@@ -256,7 +256,6 @@ class Monitor:
             f.write('Inject Error Stack:\n' + str(ep) + '\nSanitizer Stack:\n')
             f.write('\n'.join([str(i) for i in trace]))
         return True
-        
 
     def dump(self, cmd, fn):
         with open(fn, 'w') as f:
@@ -323,7 +322,6 @@ class RunnerPool:
         self.total = 0
         self.crashes = 0
         self.timeout = 0
-        
 
     async def run_one(self, i):
         inst: Runner = await self.runners.get()
