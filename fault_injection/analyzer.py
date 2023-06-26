@@ -82,10 +82,15 @@ if __name__ == '__main__':
 
     loc_file = open('loc.txt', 'w')
     func_file = open('func.txt', 'w')
+    old_func, old_loc, new_func, new_loc = 0, 0, 0, 0
     for i in funcs:
         if i.name in defined_funcs:
             continue
+        old_func += 1
+        old_loc += len(i.eh)
         if i.do_filter(args.filter, args.sim):
+            new_func += 1
+            new_loc += len(i.eh)
             loc_file.write(i.loc())
             func_file.write(str(i) + '\n')
     loc_file.close()
@@ -99,3 +104,5 @@ if __name__ == '__main__':
                 if v == 0.0 and k in global_locs:
                     print(k, global_locs[k])
             print()
+
+    print(f'old func {old_func}, old loc {old_loc}, new func {new_func}, new loc {new_loc}')
