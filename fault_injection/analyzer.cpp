@@ -25,16 +25,15 @@
 #include <vector>
 
 static std::vector<const char *> blackList{
-    "bcmp",    "memchr",      "memchr_inv", "memcmp",   "memscan",
-    "stpcpy",  "strcasecmp",  "strcat",     "strchr",   "strchrnul",
-    "strcmp",  "strcpy",      "strcspn",    "strlcat",  "strlcpy",
-    "strlen",  "strncasecmp", "strncat",    "strnchr",  "strnchrnul",
-    "strncmp", "strncpy",     "strnlen",    "strnstr",  "strpbrk",
-    "strrchr", "strscpy",     "strsep",     "strspn",   "strstr",
-    "strtok",  "atoi",        "sprintf",    "snprintf", "sscanf",
-    "memcpy",  "memmove",     "atoi",       "atol",     "atoll",
-    "strtol",  "strtoll",     "strtoul",    "strtoull", "strtod",
-    "strtof",  "strtold"};
+    "bcmp",    "memchr",      "memchr_inv", "memcmp",  "memscan",
+    "stpcpy",  "strcasecmp",  "strcat",     "strchr",  "strchrnul",
+    "strcmp",  "strcpy",      "strcspn",    "strlcat", "strlcpy",
+    "strlen",  "strncasecmp", "strncat",    "strnchr", "strnchrnul",
+    "strncmp", "strncpy",     "strnlen",    "strnstr", "strpbrk",
+    "strrchr", "strscpy",     "strsep",     "strspn",  "strstr",
+    "strtok",  "atoi",        "printf",     "scanf",   "memcpy",
+    "memmove", "atol",        "strto",
+};
 
 class ThreadPool {
  public:
@@ -121,13 +120,15 @@ static cl::opt<std::string>  InputList("list", cl::Optional,
                                        cl::desc("<list file>"),
                                        cl::cat(DefaultCat));
 
-static cl::opt<std::string> OutputFile("out", cl::Optional,
+static cl::opt<std::string> OutputFile("out-log", cl::Optional,
                                        cl::init("analyzer.log"),
                                        cl::desc("<output analyzer log>"),
                                        cl::cat(DefaultCat));
 
-static cl::opt<bool> OnlyLib("onlylib", cl::desc("only focus on lib function"),
-                             cl::cat(DefaultCat), cl::init(true));
+static cl::opt<std::string> OutputDefinedFile("out-def", cl::Optional,
+                                              cl::init("defined.log"),
+                                              cl::desc("<output defined log>"),
+                                              cl::cat(DefaultCat));
 
 static cl::opt<bool> hDebug("debug", cl::cat(DefaultCat), cl::Hidden);
 
@@ -586,11 +587,9 @@ struct Analyzer : AnalysisInfoMixin<Analyzer> {
 
       if (std::any_of(blackList.begin(), blackList.end(),
                       [callee](const std::string &s) {
-                        return s == callee->getName();
+                        return callee->getName().find(s) != StringRef::npos;
                       }))
         continue;
-
-      if (OnlyLib && !callee->empty()) continue;
 
       if (hDebug) {
         dbgs() << "Check " << callee->getName() << " In " << F.getName()
@@ -735,8 +734,6 @@ class Runner {
 
     // calc checked percentage
     for (auto &pair : checked) {
-      if (OnlyLib && definedFuncs.find(pair.first) != definedFuncs.end())
-        continue;
       auto   c = pair.second.size();
       auto   uc = unchecked[pair.first].size();
       double v = (1.0f * c) / (1.0f * (c + uc));
@@ -754,7 +751,7 @@ class Runner {
     pool.wait();
   }
 
-  void dump(llvm::raw_ostream &OS) {
+  void dump_analyzer_log(llvm::raw_ostream &OS) {
     char buf[16];
     for (auto &pair : errFuncs) {
       OS << "# " << pair.first << ',' << checked[pair.first].size() << ','
@@ -771,6 +768,12 @@ class Runner {
         snprintf(buf, sizeof(buf), "%0.3lf", sims[eh]);
         OS << eh->getLocHash() << ',' << buf << '\n';
       }
+    }
+  }
+
+  void dump_defined_func(llvm::raw_ostream &OS) {
+    for (auto &fn : definedFuncs) {
+      OS << fn << '\n';
     }
   }
 
@@ -791,5 +794,8 @@ int main(int argc, char *argv[]) {
   runner->execute();
   std::error_code EC;
   raw_fd_ostream  out(OutputFile, EC);
-  runner->dump(out);
+  runner->dump_analyzer_log(out);
+
+  raw_fd_ostream out2(OutputDefinedFile, EC);
+  runner->dump_defined_func(out2);
 }

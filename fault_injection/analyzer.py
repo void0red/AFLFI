@@ -17,7 +17,7 @@ class Func:
     __repr__ = __str__
 
     def do_filter(self, threshold, sim):
-        if 'alloc' in self.name:
+        if 'alloc' in self.name or 'memalign' in self.name:
             return self
         if self.checked / (self.checked + self.unchecked) < threshold:
             return None
@@ -31,7 +31,7 @@ class Func:
 global_locs = {}
 
 
-def parse(file):
+def read_analyzer_log(file) -> [Func]:
     n, c, uc, eh = '', 0, 0, {}
     ret = []
     with open(file) as f:
@@ -56,20 +56,35 @@ def parse(file):
     return ret
 
 
+def read_defined_funcs(file):
+    with open(file) as f:
+        data = f.read()
+    return data.splitlines()
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='gen loc.txt and func.txt from analyzer result')
     parser.add_argument('--input', type=str, help='analyzer result file', default='analyzer.log')
     parser.add_argument('--filter', type=float, default=0.7)
     parser.add_argument('--sim', type=float, default=0.9)
+    parser.add_argument('--onlylib', type=bool, default=True)
+    parser.add_argument('--funcs', type=str, help='defined func list', default='defined.log')
     parser.add_argument('--debug', action='store_true')
     args = parser.parse_args()
     assert Path(args.input).exists()
 
-    funcs = parse(args.input)
+    funcs = read_analyzer_log(args.input)
+
+    defined_funcs = []
+    if args.onlylib:
+        assert Path(args.funcs).exists()
+        defined_funcs = read_defined_funcs(args.funcs)
 
     loc_file = open('loc.txt', 'w')
     func_file = open('func.txt', 'w')
     for i in funcs:
+        if i.name in defined_funcs:
+            continue
         if i.do_filter(args.filter, args.sim):
             loc_file.write(i.loc())
             func_file.write(str(i) + '\n')

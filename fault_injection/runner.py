@@ -193,16 +193,16 @@ class CrashAnalyzer:
             assert text
 
     @staticmethod
-    def __add_to_list(l: [TraceStack], o: TraceStack) -> bool:
-        for i, v in enumerate(l):
+    def __add_to_list(dst: [TraceStack], o: TraceStack) -> bool:
+        for i, v in enumerate(dst):
             if o == v:
                 return False
             if o in v:
                 return False
             if v in o:
-                l[i] = o
+                dst[i] = o
                 return False
-        l.append(o)
+        dst.append(o)
         return True
 
     def do_parse(self, text: str) -> [TraceStack]:
@@ -257,11 +257,6 @@ class Monitor:
             f.write('\n'.join([str(i) for i in trace]))
         return True
 
-    def dump(self, cmd, fn):
-        with open(fn, 'w') as f:
-            f.write(cmd + '\n')
-            f.write(self.ep)
-
 
 class Runner:
     def __init__(self, cmd: [str], idx: int = 0, debug=False):
@@ -287,12 +282,15 @@ class Runner:
 
     async def __execute(self, *args, **kwargs) -> [CtlBlock, Monitor]:
         self.set_ctl_block(*args, **kwargs)
-        r = await asyncio.create_subprocess_exec(self.exe, *self.args,
-                                                 stdout=subprocess.DEVNULL,
-                                                 stderr=subprocess.PIPE,
-                                                 env=self.env)
-        err = await r.stderr.read()
+        self.proc = await asyncio.create_subprocess_exec(self.exe, *self.args,
+                                                         stdout=subprocess.DEVNULL,
+                                                         stderr=subprocess.PIPE,
+                                                         env=self.env)
+        err = await self.proc.stderr.read()
         return self.read_ctl_block(), Monitor(' '.join(self.cmd), err.decode())
+
+    def clean(self):
+        self.proc.kill()
 
     async def run_one(self, failth) -> [CtlBlock, Monitor]:
         ctl, mon = await self.__execute(on=2, fail_size=1, fails=(ctypes.c_uint64 * 16)(failth, ))
@@ -332,6 +330,7 @@ class RunnerPool:
                 self.crashes += 1
         except asyncio.TimeoutError:
             # logging.warning(f'runner {inst.id} timeout, {inst.read_ctl_block().get_fails()}')
+            inst.clean()
             self.timeout += 1
         self.runners.put_nowait(inst)
         self.finished += 1
