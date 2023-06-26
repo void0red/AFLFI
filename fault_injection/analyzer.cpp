@@ -587,7 +587,8 @@ struct Analyzer : AnalysisInfoMixin<Analyzer> {
 
       if (std::any_of(blackList.begin(), blackList.end(),
                       [callee](const std::string &s) {
-                        return callee->getName().find(s) != StringRef::npos;
+                        return callee->getName().lower().find(s) !=
+                               std::string::npos;
                       }))
         continue;
 
