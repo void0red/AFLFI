@@ -63,19 +63,24 @@ __attribute__((constructor(10086))) void __fault_injection_init() {
 
 #define STACK_BUFFER_SIZE 64
 thread_local void *stack_buf[STACK_BUFFER_SIZE] = {NULL};
+thread_local int   stack_buf_len = 0;
 
-static inline void do_log(uint64_t addr) {
-  if (__afl_debug) fprintf(stderr, "failth %d, addr 0x%lx\n", cb->hit, addr);
-  int size = backtrace(stack_buf, STACK_BUFFER_SIZE);
-  if (size > 0) {
-    if (__afl_debug) {
-      char **sym = backtrace_symbols(stack_buf, size);
-      for (int i = 0; i < size; ++i) {
-        fprintf(stderr, "%p,%s\n", stack_buf[i], sym[i]);
-      }
-      free(sym);
+static inline void print_stack(uint64_t addr) {
+  fprintf(stderr, "failth %d, addr 0x%lx\n", cb->hit, addr);
+  stack_buf_len = backtrace(stack_buf, STACK_BUFFER_SIZE);
+  if (stack_buf_len > 0) {
+    char **sym = backtrace_symbols(stack_buf, stack_buf_len);
+    for (int i = 0; i < stack_buf_len; ++i) {
+      fprintf(stderr, "%p,%s\n", stack_buf[i], sym[i]);
     }
-    uint64_t  v = XXH3_64bits(stack_buf, size * sizeof(void *));
+    free(sym);
+  }
+}
+
+static inline void do_log(bool collect_stack) {
+  if (collect_stack) stack_buf_len = backtrace(stack_buf, STACK_BUFFER_SIZE);
+  if (stack_buf_len > 0) {
+    uint64_t  v = XXH3_64bits(stack_buf, stack_buf_len * sizeof(void *));
     uint64_t *slot = &cb->trace_addr[cb->trace_size];
     if ((void *)slot >= (void *)cb + shm_size) {
       fprintf(stderr, "full track buffer\n");
@@ -91,7 +96,7 @@ bool __fault_injection_control() {
   uint64_t addr = (uint64_t)__builtin_return_address(0);
   cb->hit++;
   if (cb->on == 1) {
-    do_log(addr);
+    do_log(true);
     return false;
   }
 
@@ -102,7 +107,8 @@ bool __fault_injection_control() {
   for (uint32_t i = 0; i < cb->enable_size; ++i) {
     if (addr == cb->enable_addr[i]) {
       have_fault = true;
-      do_log(addr);
+      if (__afl_debug) print_stack(addr);
+      do_log(!__afl_debug);
       return true;
     }
   }
@@ -110,12 +116,11 @@ bool __fault_injection_control() {
   for (uint32_t i = 0; i < cb->fail_size; ++i) {
     if (cb->hit == cb->fail_addr[i]) {
       have_fault = true;
-      do_log(addr);
+      if (__afl_debug) print_stack(addr);
+      do_log(!__afl_debug);
       return true;
     }
   }
-
-  if (!__afl_debug && have_fault) do_log(addr);
-
+  if (have_fault) do_log(true);
   return false;
 }

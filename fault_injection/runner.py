@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import asyncio
+import copy
 import ctypes
 import logging
 import os
@@ -38,11 +39,7 @@ class CtlBlock(ctypes.Structure):
                 ('trace_size', ctypes.c_uint32),
                 ('fails', ctypes.c_uint64 * 16),
                 ('enable_addr', ctypes.c_uint64 * 32),
-                ('disable_addr', ctypes.c_uint64 * 128),
-                ('trace_addr', ctypes.c_uint64)]
-
-    def get_fails(self) -> str:
-        return 'fails:' + ','.join([str(self.fails[i]) for i in range(self.fail_size)])
+                ('disable_addr', ctypes.c_uint64 * 128)]
 
 
 @dataclass
@@ -50,7 +47,7 @@ class Symbol:
     func: str
     off: str
     loc: list
-    need_reslove: bool = field(default=False, repr=False)
+    need_resolve: bool = field(default=False, repr=False)
 
     def __eq__(self, other):
         if not isinstance(other, self.__class__):
@@ -120,7 +117,7 @@ class Symbolizer:
                 frames.append(s)
         self.__check_done()
         for i, v in enumerate(frames):
-            if v.need_reslove:
+            if v.need_resolve:
                 frames[i] = self.cache[(v.func, v.off)]
         return TraceStack(frames)
 
@@ -220,7 +217,6 @@ class CrashAnalyzer:
                 exe, off = info.split('+')
                 s = Symbol(func, off, [])
             else:
-                p = None
                 lno = 0
                 if ':' in info:
                     p, lno, _ = info.split(':')
@@ -245,6 +241,8 @@ class Monitor:
         self.raw = text
 
     def process(self, fn) -> bool:
+        if not self.raw:
+            return False
         need_save, trace = self.CrashAnalyzer_.process(self.raw)
         if not need_save:
             return False
@@ -258,12 +256,25 @@ class Monitor:
         return True
 
 
-class Runner:
-    def __init__(self, cmd: [str], idx: int = 0, debug=False):
-        self.exe = cmd[0]
-        self.args = cmd[1:]
-        self.cmd = cmd
+@dataclass
+class ErrorSeq:
+    hit: int = field(default=0)
+    fails: list[int] = field(default_factory=list)
 
+    def gen(self) -> list:
+        max_fail = 0
+        ret = []
+        if self.fails:
+            max_fail = self.fails[-1]
+        for i in range(max_fail + 1, self.hit + 1):
+            seq = copy.deepcopy(self)
+            seq.fails.append(i)
+            ret.append(seq)
+        return ret
+
+
+class Runner:
+    def __init__(self, idx: int = 0):
         self.id = idx
         self.shm_size = 1 << 20
         self.shm_name = f'fj.runner.{idx}'
@@ -272,36 +283,43 @@ class Runner:
         self.env = os.environ.copy()
         self.env.update(AFL_DEBUG='1', FJ_SHM_ID=self.shm_name, FJ_SHM_SIZE=str(self.shm_size))
 
-    def set_ctl_block(self, *args, **kwargs):
-        b = bytes(CtlBlock(*args, **kwargs))
+    def set_ctl_block(self, **kwargs):
+        b = bytes(CtlBlock(**kwargs))
         self.shm.buf[:len(b)] = b
 
     def read_ctl_block(self) -> CtlBlock:
         b = CtlBlock.from_buffer_copy(self.shm.buf)
         return b
 
+    def read_trace(self, size: int) -> set[int]:
+        trace = (ctypes.c_uint64 * size)(self.shm.buf[ctypes.sizeof(CtlBlock):])
+        return set(trace)
+
     async def __execute(self, *args, **kwargs) -> [CtlBlock, Monitor]:
-        self.set_ctl_block(*args, **kwargs)
-        self.proc = await asyncio.create_subprocess_exec(self.exe, *self.args,
+        self.set_ctl_block(**kwargs)
+        exe, *cmd = args
+        self.proc = await asyncio.create_subprocess_exec(exe, *cmd,
                                                          stdout=subprocess.DEVNULL,
                                                          stderr=subprocess.PIPE,
                                                          env=self.env)
         err = await self.proc.stderr.read()
-        return self.read_ctl_block(), Monitor(' '.join(self.cmd), err.decode())
+        return self.read_ctl_block(), Monitor(' '.join(args), err.decode())
 
     def clean(self):
         self.proc.kill()
 
-    async def run_one(self, failth) -> [CtlBlock, Monitor]:
-        ctl, mon = await self.__execute(on=2, fail_size=1, fails=(ctypes.c_uint64 * 16)(failth, ))
-        logging.debug(f'runner {self.id} fail on {failth}, hit {ctl.hit} errors')
+    async def run(self, seq: ErrorSeq, *args) -> [CtlBlock, Monitor]:  # self.cmd: list[str] = list(cmd)
+        # self.name: str = Path(cmd[0]).name + ',' + str(int(time.time()))
+        ctl, mon = await self.__execute(*args, on=2, fail_size=len(seq.fails), fails=(ctypes.c_uint64 * 16)(seq.fails))
+        seq.hit = ctl.hit
+        logging.debug(f'runner {self.id} fail on {seq.fails}, hit {ctl.hit} errors')
         return ctl, mon
 
-    async def probe(self) -> int:
-        ctl, _ = await self.__execute(on=1)
+    async def probe(self, *args) -> CtlBlock:
+        ctl, _ = await self.__execute(*args, on=1)
         max_hit = (self.shm_size - ctypes.sizeof(ctl)) // 8
         logging.info(f'probe {ctl.hit} errors, max {max_hit} errors')
-        return ctl.hit
+        return ctl
 
     def __del__(self):
         self.shm.close()
@@ -309,48 +327,71 @@ class Runner:
 
 
 class RunnerPool:
-    def __init__(self, cmd, n, debug=False):
-        self.cmd = ' '.join(cmd)
-        self.name = Path(cmd[0]).name + ',' + str(int(time.time()))
+    def __init__(self, n: int):
         self.runners = asyncio.Queue(n)
         for i in range(n):
-            self.runners.put_nowait(Runner(cmd, i, debug))
-
+            self.runners.put_nowait(Runner(i))
+        self.pending_fault = asyncio.Queue()
+        self.points = set()
         self.finished = 0
         self.total = 0
         self.crashes = 0
         self.timeout = 0
 
-    async def run_one(self, i):
+    def __check_new(self, trace: set[int]) -> bool:
+        diff = trace - self.points
+        if not diff:
+            return False
+        self.points.update(diff)
+        return True
+
+    async def do_fault(self, seq: ErrorSeq, fuzz: bool = False, *args):
         inst: Runner = await self.runners.get()
         try:
-            ctl, mon = await asyncio.wait_for(inst.run_one(i), 60)
-            saved = mon.process(f'{self.name},runner:{inst.id},{ctl.get_fails()}.log')
+            ctl, mon = await asyncio.wait_for(inst.run(seq, *args), 60)
+            fails = ','.join([str(i) for i in seq.fails])
+            saved = mon.process(f'{args[0]},{int(time.time())},{self.crashes},fails:{fails}.log')
             if saved:
                 self.crashes += 1
+            if fuzz:
+                trace = inst.read_trace(ctl.trace_size)
+                if self.__check_new(trace):
+                    self.pending_fault.put_nowait(seq)
         except asyncio.TimeoutError:
-            # logging.warning(f'runner {inst.id} timeout, {inst.read_ctl_block().get_fails()}')
             inst.clean()
             self.timeout += 1
         self.runners.put_nowait(inst)
         self.finished += 1
         print(f'task done {self.finished}/{self.total}, timeout {self.timeout}, bug {self.crashes}', end='\r')
 
-    async def loop(self):
+    async def run_cmd(self, fuzz=False, force=False, *cmd: str):
         inst: Runner = await self.runners.get()
-        hit = await inst.probe()
+        ctl = await inst.probe(*cmd)
+        hit = ctl.hit
+        self.total += hit
+        trace = inst.read_trace(ctl.trace_size)
         self.runners.put_nowait(inst)
-        self.total = hit
-        await asyncio.gather(*[self.run_one(i) for i in range(1, hit + 1)])
+        if not force and not self.__check_new(trace):
+            logging.debug('can\'t find new points in: ' + ' '.join(cmd))
+            return
+        init = ErrorSeq(hit)
+        await asyncio.gather(*[self.do_fault(seq, fuzz, *cmd) for seq in init.gen()])
+
+        while not self.pending_fault.empty():
+            seq: ErrorSeq = self.pending_fault.get_nowait()
+            new_seq = seq.gen()
+            logging.debug(f'fetch {len(new_seq)} new points')
+            self.total += len(new_seq)
+            await asyncio.gather(*[self.do_fault(seq, True, *cmd) for seq in new_seq])
 
 
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--failth', type=int)
-    parser.add_argument('--debug', action='store_true')
+    # parser.add_argument('--debug', action='store_true')
     parser.add_argument('--probe', action='store_true')
     parser.add_argument('--thread', action='store_true')
-    # parser.add_argument('--timeout', type=int, default=60)
+    parser.add_argument('--fuzz', action='store_true')
     parser.add_argument('exe', type=str, nargs=argparse.REMAINDER)
     return parser.parse_args()
 
@@ -365,10 +406,11 @@ if __name__ == '__main__':
         logging.basicConfig(level=logging.INFO)
 
     if parm.probe:
-        asyncio.run(Runner(parm.exe, parm.debug).probe())
+        asyncio.run(Runner().probe(*parm.exe))
     elif parm.failth:
-        asyncio.run(Runner(parm.exe, parm.debug).run_one(parm.failth))
+        asyncio.run(Runner().run(parm.failth, *parm.exe))
     elif parm.thread:
+        pool = RunnerPool(os.cpu_count())
         start = time.time()
-        asyncio.run(RunnerPool(parm.exe, os.cpu_count(), parm.debug).loop())
-        logging.info(f'cost {time.time() - start}s')
+        asyncio.run(pool.run_cmd(parm.fuzz, False, *parm.exe))
+        logging.info(f'\ncost {time.time() - start}s')
