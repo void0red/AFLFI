@@ -291,8 +291,10 @@ class Runner:
         b = CtlBlock.from_buffer_copy(self.shm.buf)
         return b
 
-    def read_trace(self, size: int) -> set[int]:
-        trace = (ctypes.c_uint64 * size)(self.shm.buf[ctypes.sizeof(CtlBlock):])
+    def read_trace(self, size: int):
+        if size == 0:
+            return set()
+        trace = (ctypes.c_uint64 * size).from_buffer(self.shm.buf, ctypes.sizeof(CtlBlock))
         return set(trace)
 
     async def __execute(self, *args, **kwargs) -> [CtlBlock, Monitor]:
@@ -310,7 +312,7 @@ class Runner:
 
     async def run(self, seq: ErrorSeq, *args) -> [CtlBlock, Monitor]:  # self.cmd: list[str] = list(cmd)
         # self.name: str = Path(cmd[0]).name + ',' + str(int(time.time()))
-        ctl, mon = await self.__execute(*args, on=2, fail_size=len(seq.fails), fails=(ctypes.c_uint64 * 16)(seq.fails))
+        ctl, mon = await self.__execute(*args, on=2, fail_size=len(seq.fails), fails=(ctypes.c_uint64 * 16)(*seq.fails))
         seq.hit = ctl.hit
         logging.debug(f'runner {self.id} fail on {seq.fails}, hit {ctl.hit} errors')
         return ctl, mon
@@ -327,16 +329,17 @@ class Runner:
 
 
 class RunnerPool:
-    def __init__(self, n: int):
+    def __init__(self, n: int, timeout: int):
         self.runners = asyncio.Queue(n)
         for i in range(n):
             self.runners.put_nowait(Runner(i))
+        self.timeout = timeout
         self.pending_fault = asyncio.Queue()
         self.points = set()
         self.finished = 0
         self.total = 0
         self.crashes = 0
-        self.timeout = 0
+        self.timeouts = 0
 
     def __check_new(self, trace: set[int]) -> bool:
         diff = trace - self.points
@@ -348,9 +351,9 @@ class RunnerPool:
     async def do_fault(self, seq: ErrorSeq, fuzz: bool = False, *args):
         inst: Runner = await self.runners.get()
         try:
-            ctl, mon = await asyncio.wait_for(inst.run(seq, *args), 60)
+            ctl, mon = await asyncio.wait_for(inst.run(seq, *args), self.timeout)
             fails = ','.join([str(i) for i in seq.fails])
-            saved = mon.process(f'{args[0]},{int(time.time())},{self.crashes},fails:{fails}.log')
+            saved = mon.process(f'{Path(args[0]).name},{int(time.time())},{self.crashes},fails:{fails}.log')
             if saved:
                 self.crashes += 1
             if fuzz:
@@ -359,18 +362,18 @@ class RunnerPool:
                     self.pending_fault.put_nowait(seq)
         except asyncio.TimeoutError:
             inst.clean()
-            self.timeout += 1
+            self.timeouts += 1
         self.runners.put_nowait(inst)
         self.finished += 1
-        print(f'task done {self.finished}/{self.total}, timeout {self.timeout}, bug {self.crashes}', end='\r')
+        print(f'task done {self.finished}/{self.total}, timeout {self.timeouts}, bug {self.crashes}', end='\r')
 
     async def run_cmd(self, fuzz=False, force=False, *cmd: str):
         inst: Runner = await self.runners.get()
         ctl = await inst.probe(*cmd)
+        self.runners.put_nowait(inst)
         hit = ctl.hit
         self.total += hit
         trace = inst.read_trace(ctl.trace_size)
-        self.runners.put_nowait(inst)
         if not force and not self.__check_new(trace):
             logging.debug('can\'t find new points in: ' + ' '.join(cmd))
             return
@@ -388,9 +391,11 @@ class RunnerPool:
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--failth', type=int)
-    # parser.add_argument('--debug', action='store_true')
+    parser.add_argument('--debug', action='store_true')
     parser.add_argument('--probe', action='store_true')
     parser.add_argument('--thread', action='store_true')
+    parser.add_argument('--timeout', type=int, default=30)
+    # parser.add_argument('--fast', action='store_true')
     parser.add_argument('--fuzz', action='store_true')
     parser.add_argument('exe', type=str, nargs=argparse.REMAINDER)
     return parser.parse_args()
@@ -410,7 +415,7 @@ if __name__ == '__main__':
     elif parm.failth:
         asyncio.run(Runner().run(parm.failth, *parm.exe))
     elif parm.thread:
-        pool = RunnerPool(os.cpu_count())
+        pool = RunnerPool(os.cpu_count(), parm.timeout)
         start = time.time()
         asyncio.run(pool.run_cmd(parm.fuzz, False, *parm.exe))
         logging.info(f'\ncost {time.time() - start}s')
