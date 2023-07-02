@@ -47,6 +47,7 @@ struct FailSeq {
       // copy from boost hash_combine
       ret ^= data[i] + 0x9e3779b9 + (ret << 6) + (ret >> 2);
     }
+    return ret;
   }
 };
 
