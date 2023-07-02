@@ -1,16 +1,16 @@
+#include "fault.h"
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <array>
 #include <cstdio>
 #include <cstdlib>
 #include <deque>
-#include <vector>
-#include <unordered_map>
-#include <unordered_set>
 #include <functional>
 #include <string>
-#include <array>
-#include "fault.h"
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 #define INIT_FREE_SLOT 128
 
@@ -52,7 +52,7 @@ struct FailSeq {
 
 struct Manager {
   bool                         fifuzz;
-  bool skip;
+  bool                         skip;
   std::vector<uint64_t>        new_trace;
   std::unordered_set<uint64_t> seqHash;
 
@@ -70,7 +70,7 @@ struct Manager {
 
   explicit Manager(uint8_t *id)
       : fifuzz(getenv("FJ_FIFUZZ") != nullptr),
-      skip(getenv("FJ_SKIP") != nullptr),
+        skip(getenv("FJ_SKIP") != nullptr),
         ctl(init_ctl_block(id)),
         free_queue(INIT_FREE_SLOT) {
     for (int i = 0; i < INIT_FREE_SLOT; ++i) {
@@ -180,8 +180,7 @@ struct Manager {
     last_hit = ctl->hit;
 
     if (have_new_trace(current_fn)) {
-      create_new_work();
-      return FJ_RUN_SAVED;
+      if (create_new_work()) return FJ_RUN_SAVED;
     }
     return FJ_RUN_NEXT;
   }
@@ -220,16 +219,17 @@ struct Manager {
     }
   }
 
-  void create_new_work() {
-    if (!last_seq || skip) return;
+  bool create_new_work() {
+    if (!last_seq || skip) return false;
     auto size = last_seq->size;
-    if (size == MAX_FAIL_SIZE) return;
+    if (size == MAX_FAIL_SIZE) return false;
 
     if (fifuzz) {
       fifuzz_save();
     } else {
       normal_save();
     }
+    return true;
   }
 };
 
