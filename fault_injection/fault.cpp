@@ -9,6 +9,7 @@
 #include <unordered_set>
 #include <functional>
 #include <string>
+#include <array>
 #include "fault.h"
 
 #define INIT_FREE_SLOT 128
@@ -51,6 +52,7 @@ struct FailSeq {
 
 struct Manager {
   bool                         fifuzz;
+  bool skip;
   std::vector<uint64_t>        new_trace;
   std::unordered_set<uint64_t> seqHash;
 
@@ -68,6 +70,7 @@ struct Manager {
 
   explicit Manager(uint8_t *id)
       : fifuzz(getenv("FJ_FIFUZZ") != nullptr),
+      skip(getenv("FJ_SKIP") != nullptr),
         ctl(init_ctl_block(id)),
         free_queue(INIT_FREE_SLOT) {
     for (int i = 0; i < INIT_FREE_SLOT; ++i) {
@@ -218,7 +221,7 @@ struct Manager {
   }
 
   void create_new_work() {
-    if (!last_seq) return;
+    if (!last_seq || skip) return;
     auto size = last_seq->size;
     if (size == MAX_FAIL_SIZE) return;
 
@@ -268,6 +271,6 @@ bool check_randomize() {
     return false;
   }
   close(fd);
-  if (buf[0] != 0) return false;
+  if (buf[0] != '0') return false;
   return true;
 }
