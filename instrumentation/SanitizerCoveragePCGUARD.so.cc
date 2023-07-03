@@ -218,7 +218,7 @@ llvmGetPassPluginInfo() {
                 [](ModulePassManager &MPM, OptimizationLevel OL) {
 
                   MPM.addPass(ModuleSanitizerCoverageAFL());
-
+                  MPM.addPass(FaultInjectionPass());
                 });
 
           }};

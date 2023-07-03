@@ -330,6 +330,17 @@ llvm:
 	-$(MAKE) -j$(nproc) -f GNUmakefile.llvm
 	@test -e afl-cc || { echo "[-] Compiling afl-cc failed. You seem not to have a working compiler." ; exit 1; }
 
+.PHONY: fault fault-rt fault-analyzer
+fault: fault-rt fault-analyzer
+
+fault-rt:
+	-$(CC) $(CFLAGS) -c fault_injection/rt.c -Iinclude -o fj-rt.o
+	-$(CC) $(CFLAGS) -c fault_injection/fifuzz-rt.c -Iinclude -o fifuzz-rt.o
+
+fault-analyzer:
+	@cmake -S fault_injection -B fault_injection/build
+	@cmake --build fault_injection/build
+
 .PHONY: gcc_plugin
 gcc_plugin:
 ifneq "$(SYS)" "Darwin"
