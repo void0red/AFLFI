@@ -31,3 +31,5 @@ endif ()
 
 add_executable(analyzer analyzer.cpp)
 llvm_config(analyzer ${USE_SHARED} support core irreader passes)
+
+add_library(inst SHARED inst.cpp)

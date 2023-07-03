@@ -1490,14 +1490,6 @@ static void edit_params(u32 argc, char **argv, char **envp) {
 
 #endif
 
-  if (!shared_linking || !partial_linking) {
-    if (getenv("FJ_FIFUZZ"))
-      cc_params[cc_par_cnt++] = alloc_printf("%s/fifuzz-rt.o", obj_path);
-    else
-      cc_params[cc_par_cnt++] = alloc_printf("%s/fj-rt.o", obj_path);
-    cc_params[cc_par_cnt++] = "-lrt";
-  }
-
   cc_params[cc_par_cnt] = NULL;
 
 }

@@ -23,7 +23,7 @@ def handle_bitcode_mode(l: list):
     compile_mode = False
     link_mode = False
     outfile_idx = 0
-    fixed_args = ['clang'] + l[1:]
+    fixed_args = [clang] + l[1:]
 
     if '-c' in l:
         compile_mode = True
@@ -44,7 +44,7 @@ def handle_bitcode_mode(l: list):
 
     if compile_mode:
         if outfile_idx > 0:
-            tmp_args = ['clang', '-emit-llvm', '-g'] + l[1:outfile_idx] + [get_bc_name(l[outfile_idx])]
+            tmp_args = [clang, '-emit-llvm', '-g'] + l[1:outfile_idx] + [get_bc_name(l[outfile_idx])]
             if outfile_idx + 1 < len(l):
                 tmp_args += l[outfile_idx + 1:]
             logging.debug(' '.join(tmp_args))
@@ -54,7 +54,7 @@ def handle_bitcode_mode(l: list):
             except Exception as e:
                 logging.info(e)
         else:
-            fixed_args = ['clang', '-emit-llvm', '-g'] + l[1:]
+            fixed_args = [clang, '-emit-llvm', '-g'] + l[1:]
     elif link_mode:
         # if outfile_idx > 0:
         #     tmp_args = ['llvm-link', '-o', get_bc_name(l[outfile_idx], True)] + [get_bc_name(i) for i in multi_objs]
@@ -70,14 +70,34 @@ def handle_bitcode_mode(l: list):
     return fixed_args
 
 
-def handle_afl_mode(l: list, cov=False):
+def handle_fault_mode(l: list, fifuzz=False):
+    inst_plugin = Path(__file__).parent / 'build' / 'libinst.so'
+    rt_o = Path(__file__).parent.parent / 'fj-rt.o'
+    fifuzz_rt_o = Path(__file__).parent.parent / 'fifuzz-rt.o'
+    assert inst_plugin.exists() and rt_o.exists() and fifuzz_rt_o.exists()
+    if fifuzz:
+        rt_obj = str(fifuzz_rt_o)
+    else:
+        rt_obj = str(rt_o)
+
+    ret = [clang, '-g', '-fprofile-arcs', '-ftest-coverage',
+           '-fsanitize=address,undefined',
+           '-fexperimental-new-pass-manager', '-fpass-plugin=' + str(inst_plugin)]
+    if '-c' in l or '-E' in l:
+        return ret + l[1:]
+
+    ret += l[1:] + ['--coverage']
+    if '-o' in ret:
+        ret.insert(ret.index('-o') - 1, rt_obj)
+    else:
+        ret.append(rt_obj)
+    return ret
+
+
+def handle_afl_mode(l: list):
     afl_cc = Path(__file__).parent.parent.joinpath('afl-clang-fast')
     assert afl_cc.exists()
-    ret = [str(afl_cc)]
-    if cov:
-        ret += [' -fprofile-arcs ', '-ftest-coverage', '--coverage']
-    ret += l[1:]
-    return ret
+    return [str(afl_cc)] + l[1:]
 
 
 if __name__ == '__main__':
@@ -87,23 +107,20 @@ if __name__ == '__main__':
         logging.basicConfig(level=logging.INFO, filename='compile.log')
 
     env = os.environ
+    clang = env.get('CLANG') or 'clang'
 
-    if env.get('FJ_FUNC') or \
-            env.get('FJ_LOC') or \
-            env.get('FJ_DIS') or \
-            env.get('AFL_USE_ASAN') or \
-            env.get('AFL_USE_UBSAN'):
-        new_args = handle_afl_mode(sys.argv, True if env.get('FJ_COV') is not None else False)
-    elif env.get('HOOK_RAW'):
-        new_args = ['clang'] + sys.argv[1:]
-        logging.info(' '.join(new_args))
+    if env.get('HOOK_RAW'):
+        new_args = [clang] + sys.argv[1:]
+    elif env.get('AFL_USE_ASAN') or env.get('AFL_USE_UBSAN'):
+        new_args = handle_afl_mode(sys.argv)
+    elif env.get('FJ_FUNC') or env.get('FJ_DIS') or env.get('FJ_COV'):
+        new_args = handle_fault_mode(sys.argv, False if env.get('FJ_FIFUZZ') is None else True)
     else:
         new_args = handle_bitcode_mode(sys.argv)
-
     logging.info(' '.join(new_args))
     try:
         r = subprocess.run(new_args, env=env, timeout=30)
         exit(r.returncode)
     except subprocess.TimeoutExpired:
-        r = subprocess.run(['clang'] + sys.argv[1:])
+        r = subprocess.run([clang] + sys.argv[1:])
         exit(r.returncode)
