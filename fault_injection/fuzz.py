@@ -43,7 +43,8 @@ if __name__ == '__main__':
     while True:
         cmds = get_all_cmd(sys_args.out) - fuzzed
         fuzzed.update(cmds)
-        print(f'fetch {len(cmds)} new testcase')
+        if len(cmds) > 0:
+            print(f'fetch {len(cmds)} new testcase')
         loop = asyncio.new_event_loop()
         for cmd in cmds:
             print(cmd)

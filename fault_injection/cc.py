@@ -70,10 +70,14 @@ def handle_bitcode_mode(l: list):
     return fixed_args
 
 
-def handle_afl_mode(l: list):
+def handle_afl_mode(l: list, cov=False):
     afl_cc = Path(__file__).parent.parent.joinpath('afl-clang-fast')
     assert afl_cc.exists()
-    return [str(afl_cc)] + l[1:]
+    ret = [str(afl_cc)]
+    if cov:
+        ret += [' -fprofile-arcs ', '-ftest-coverage', '--coverage']
+    ret += l[1:]
+    return ret
 
 
 if __name__ == '__main__':
@@ -89,7 +93,7 @@ if __name__ == '__main__':
             env.get('FJ_DIS') or \
             env.get('AFL_USE_ASAN') or \
             env.get('AFL_USE_UBSAN'):
-        new_args = handle_afl_mode(sys.argv)
+        new_args = handle_afl_mode(sys.argv, True if env.get('FJ_COV') is not None else False)
     elif env.get('HOOK_RAW'):
         new_args = ['clang'] + sys.argv[1:]
         logging.info(' '.join(new_args))
