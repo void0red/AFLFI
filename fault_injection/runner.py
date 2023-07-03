@@ -261,6 +261,7 @@ class Monitor:
 class ErrorSeq:
     hit: int = field(default=0)
     fails: list[int] = field(default_factory=list)
+    trace: list[int] = field(default_factory=list)
 
     def gen(self) -> list:
         max_fail = 0
@@ -277,7 +278,8 @@ class ErrorSeq:
 class Runner:
     shm_size = 1 << 20
     max_hit = (shm_size - ctypes.sizeof(CtlBlock)) // 8
-    logging.info(f'max {max_hit} errors')
+    max_fails = 16
+    print(f'max {max_hit} errors')
 
     def __init__(self, idx: int = 0):
         self.id = idx
@@ -344,13 +346,20 @@ class RunnerPool:
         self.crashes = 0
         self.timeouts = 0
         self.fifuzz = os.environ.get('FJ_FIFUZZ') is not None
+        self.seq_hash = set()
 
-    def __check_new(self, trace: set[int]) -> bool:
+    def __check_new(self, trace: set[int]) -> set:
         diff = trace - self.points
-        if not diff:
-            return False
         self.points.update(diff)
-        return True
+        return diff
+
+    def __check_dup(self, l: list):
+        ll = sorted(l)
+        hs = hash(ll)
+        if hs in self.seq_hash:
+            return True
+        self.seq_hash.add(hs)
+        return False
 
     async def do_fault(self, seq: ErrorSeq, fuzz: bool = False, *args):
         inst: Runner = await self.runners.get()
@@ -362,14 +371,21 @@ class RunnerPool:
                 self.crashes += 1
             if fuzz:
                 trace = inst.read_trace(ctl.trace_size)
-                if self.__check_new(trace):
-                    self.pending_fault.put_nowait(seq)
+                new_trace = self.__check_new(trace)
+                if new_trace:
+                    if self.fifuzz:
+                        seq.trace = new_trace
+                        self.pending_fault.put_nowait(seq)
+                    else:
+                        self.pending_fault.put_nowait(seq)
         except asyncio.TimeoutError:
             inst.clean()
             self.timeouts += 1
         self.runners.put_nowait(inst)
         self.finished += 1
-        print(f'task done {self.finished}/{self.total}, timeout {self.timeouts}, bug {self.crashes}', end='\r')
+        print(
+            f'task done {self.finished}/{self.total}, timeout {self.timeouts}, bug {self.crashes}, points {len(self.points)}',
+            end='\r')
 
     async def run_cmd(self, fuzz=False, force=False, *cmd: str):
         inst: Runner = await self.runners.get()
@@ -381,18 +397,38 @@ class RunnerPool:
             trace.update(inst.read_trace(ctl.trace_size))
         self.runners.put_nowait(inst)
         self.total += hit
-        if not force and not self.__check_new(trace):
+        new_trace = self.__check_new(trace)
+        if not force and not new_trace:
             logging.debug('can\'t find new points in: ' + ' '.join(cmd))
             return
-        init = ErrorSeq(hit)
-        await asyncio.gather(*[self.do_fault(seq, fuzz, *cmd) for seq in init.gen()])
+        if self.fifuzz:
+            tasks = []
+            for i in new_trace:
+                e = ErrorSeq(hit)
+                e.fails.append(i)
+                tasks.append(e)
+        else:
+            tasks = ErrorSeq(hit).gen()
+
+        await asyncio.gather(*[self.do_fault(seq, fuzz, *cmd) for seq in tasks])
 
         while not self.pending_fault.empty():
             seq: ErrorSeq = self.pending_fault.get_nowait()
-            new_seq = seq.gen()
-            logging.debug(f'fetch {len(new_seq)} new points')
-            self.total += len(new_seq)
-            await asyncio.gather(*[self.do_fault(seq, True, *cmd) for seq in new_seq])
+            if self.fifuzz:
+                tasks = []
+                for i in seq.trace:
+                    if i in seq.fails or len(seq.fails) >= Runner.max_fails:
+                        continue
+                    new_fails = seq.fails.copy()
+                    new_fails.append(i)
+                    if self.__check_dup(new_fails):
+                        continue
+                    tasks.append(ErrorSeq(seq.hit, new_fails))
+            else:
+                tasks = seq.gen()
+            logging.debug(f'fetch {len(tasks)} new points')
+            self.total += len(tasks)
+            await asyncio.gather(*[self.do_fault(seq, True, *cmd) for seq in tasks])
 
 
 def get_args():

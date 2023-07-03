@@ -30,7 +30,7 @@ def concat_cmd(instance, new_bin):
 def get_all_cmd(out, new_bin):
     ret = set()
     for i in os.listdir(out):
-        ret.update(concat_cmd(out / i, new_bin))
+        ret.update(concat_cmd(Path(out).joinpath(i), new_bin))
     return ret
 
 
