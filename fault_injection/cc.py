@@ -16,6 +16,7 @@ def get_bc_name(old, link=False):
 
 ignore_file_ext = ['.s', '.S', '.bc']
 
+
 def handle_bitcode_mode(l: list):
     logging.debug('recv: ' + ' '.join(l))
 
@@ -48,7 +49,8 @@ def handle_bitcode_mode(l: list):
                 tmp_args += l[outfile_idx + 1:]
             logging.debug(' '.join(tmp_args))
             try:
-                subprocess.run(tmp_args, env=os.environ, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(tmp_args, env=os.environ, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                               timeout=30)
             except Exception as e:
                 logging.info(e)
         else:
@@ -83,10 +85,10 @@ if __name__ == '__main__':
     env = os.environ
 
     if env.get('FJ_FUNC') or \
-        env.get('FJ_LOC') or \
-        env.get('FJ_DIS') or \
-        env.get('AFL_USE_ASAN') or \
-        env.get('AFL_USE_UBSAN'):
+            env.get('FJ_LOC') or \
+            env.get('FJ_DIS') or \
+            env.get('AFL_USE_ASAN') or \
+            env.get('AFL_USE_UBSAN'):
         new_args = handle_afl_mode(sys.argv)
     elif env.get('HOOK_RAW'):
         new_args = ['clang'] + sys.argv[1:]
@@ -95,5 +97,9 @@ if __name__ == '__main__':
         new_args = handle_bitcode_mode(sys.argv)
 
     logging.info(' '.join(new_args))
-    r = subprocess.run(new_args, env=env)
-    exit(r.returncode)
+    try:
+        r = subprocess.run(new_args, env=env, timeout=30)
+        exit(r.returncode)
+    except subprocess.TimeoutExpired:
+        r = subprocess.run(['clang'] + sys.argv[1:])
+        exit(r.returncode)
