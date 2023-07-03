@@ -335,8 +335,11 @@ class Runner:
 
 
 def find_min_id():
-    return max([int(f.removeprefix(Runner.shm_prefix)) for f in os.listdir('/dev/shm') if
-                f.startswith(Runner.shm_prefix)]) + 1
+    ids = [int(f.removeprefix(Runner.shm_prefix)) for f in os.listdir('/dev/shm') if
+           f.startswith(Runner.shm_prefix)]
+    if len(ids) == 0:
+        return 0
+    return max(ids) + 1
 
 
 class RunnerPool:
