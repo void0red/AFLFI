@@ -5,7 +5,7 @@
 # GCC 11 is used instead of 12 because genhtml for afl-cov doesn't like it.
 #
 
-FROM ubuntu:22.04 AS aflplusplus
+FROM ubuntu:22.04 AS aflfi
 LABEL "maintainer"="AFL++ team <afl@aflplus.plus>"
 LABEL "about"="AFLplusplus container image"
 
@@ -29,8 +29,7 @@ ENV NO_ARCH_OPT=1
 ENV IS_DOCKER=1
 
 RUN apt-get update && apt-get full-upgrade -y && \
-    apt-get install -y --no-install-recommends wget ca-certificates apt-utils && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get install -y --no-install-recommends wget ca-certificates apt-utils
 
 RUN echo "deb [signed-by=/etc/apt/keyrings/llvm-snapshot.gpg.key] http://apt.llvm.org/jammy/ llvm-toolchain-jammy-${LLVM_VERSION} main" > /etc/apt/sources.list.d/llvm.list && \
     wget -qO /etc/apt/keyrings/llvm-snapshot.gpg.key https://apt.llvm.org/llvm-snapshot.gpg.key
@@ -54,18 +53,19 @@ RUN apt-get update && \
     lld-${LLVM_VERSION} lldb-${LLVM_VERSION} llvm-${LLVM_VERSION} \
     llvm-${LLVM_VERSION}-dev llvm-${LLVM_VERSION}-runtime llvm-${LLVM_VERSION}-tools \
     $([ "$(dpkg --print-architecture)" = "amd64" ] && echo gcc-${GCC_VERSION}-multilib gcc-multilib) \
-    $([ "$(dpkg --print-architecture)" = "arm64" ] && echo libcapstone-dev) && \
-    rm -rf /var/lib/apt/lists/*
+    $([ "$(dpkg --print-architecture)" = "arm64" ] && echo libcapstone-dev) \
+    fd-find ripgrep bat
     # gcc-multilib is only used for -m32 support on x86
     # libcapstone-dev is used for coresight_mode on arm64
 
 RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-${GCC_VERSION} 0 && \
     update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-${GCC_VERSION} 0 && \
     update-alternatives --install /usr/bin/clang clang /usr/bin/clang-${LLVM_VERSION} 0 && \
-    update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-${LLVM_VERSION} 0
+    update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-${LLVM_VERSION} 0 && \
+    update-alternatives --install /usr/bin/llvm-addr2line llvm-addr2line /usr/bin/llvm-addr2line-${LLVM_VERSION} 0 && \
+    update-alternatives --install /usr/bin/llvm-config llvm-config /usr/bin/llvm-config-${LLVM_VERSION} 0 && \
+    update-alternatives --install /usr/bin/llvm-link llvm-link /usr/bin/llvm-link-${LLVM_VERSION} 0
 
-RUN wget -qO- https://sh.rustup.rs | CARGO_HOME=/etc/cargo sh -s -- -y -q --no-modify-path
-ENV PATH=$PATH:/etc/cargo/bin
 
 RUN apt clean -y
 
@@ -77,21 +77,17 @@ ENV AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1
 RUN git clone --depth=1 https://github.com/vanhauser-thc/afl-cov && \
     (cd afl-cov && make install) && rm -rf afl-cov
 
-WORKDIR /AFLplusplus
+WORKDIR /AFLFI
 COPY . .
 
 ARG CC=gcc-$GCC_VERSION
 ARG CXX=g++-$GCC_VERSION
 
-# Used in CI to prevent a 'make clean' which would remove the binaries to be tested
-ARG TEST_BUILD
-
-RUN sed -i.bak 's/^	-/	/g' GNUmakefile && \
-    make clean && make distrib && \
-    ([ "${TEST_BUILD}" ] || (make install && make clean)) && \
-    mv GNUmakefile.bak GNUmakefile
+RUN make clean && make -j
 
 RUN echo "set encoding=utf-8" > /root/.vimrc && \
     echo ". /etc/bash_completion" >> ~/.bashrc && \
     echo 'alias joe="joe --wordwrap --joe_state -nobackup"' >> ~/.bashrc && \
-    echo "export PS1='"'[AFL++ \h] \w \$ '"'" >> ~/.bashrc
+    echo "export PS1='"'[AFLFI \h] \w \$ '"'" >> ~/.bashrc && \
+    echo "alias bat=batcat" >> ~/.bashrc && \
+    echo "alias fd=fdfind" >> ~/.bashrc

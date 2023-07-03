@@ -5,6 +5,7 @@ import copy
 import ctypes
 import logging
 import os
+import queue
 import re
 import subprocess
 from dataclasses import dataclass, field
@@ -274,9 +275,12 @@ class ErrorSeq:
 
 
 class Runner:
+    shm_size = 1 << 20
+    max_hit = (shm_size - ctypes.sizeof(CtlBlock)) // 8
+    logging.info(f'max {max_hit} errors')
+
     def __init__(self, idx: int = 0):
         self.id = idx
-        self.shm_size = 1 << 20
         self.shm_name = f'fj.runner.{idx}'
         self.shm = SharedMemory(self.shm_name, create=True, size=self.shm_size)
 
@@ -319,8 +323,7 @@ class Runner:
 
     async def probe(self, *args) -> CtlBlock:
         ctl, _ = await self.__execute(*args, on=1)
-        max_hit = (self.shm_size - ctypes.sizeof(ctl)) // 8
-        logging.info(f'probe {ctl.hit} errors, max {max_hit} errors')
+        logging.info(f'probe {ctl.hit} errors')
         return ctl
 
     def __del__(self):
@@ -334,12 +337,13 @@ class RunnerPool:
         for i in range(n):
             self.runners.put_nowait(Runner(i))
         self.timeout = timeout
-        self.pending_fault = asyncio.Queue()
+        self.pending_fault = queue.Queue()
         self.points = set()
         self.finished = 0
         self.total = 0
         self.crashes = 0
         self.timeouts = 0
+        self.fifuzz = os.environ.get('FJ_FIFUZZ') is not None
 
     def __check_new(self, trace: set[int]) -> bool:
         diff = trace - self.points
@@ -369,11 +373,14 @@ class RunnerPool:
 
     async def run_cmd(self, fuzz=False, force=False, *cmd: str):
         inst: Runner = await self.runners.get()
-        ctl = await inst.probe(*cmd)
+        hit = 0
+        trace = set()
+        for i in range(3):
+            ctl = await inst.probe(*cmd)
+            hit = max(ctl.hit, hit)
+            trace.update(inst.read_trace(ctl.trace_size))
         self.runners.put_nowait(inst)
-        hit = ctl.hit
         self.total += hit
-        trace = inst.read_trace(ctl.trace_size)
         if not force and not self.__check_new(trace):
             logging.debug('can\'t find new points in: ' + ' '.join(cmd))
             return

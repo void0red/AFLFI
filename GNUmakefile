@@ -311,7 +311,7 @@ ifdef TEST_MMAP
 endif
 
 .PHONY: all
-all:	test_x86 test_shm test_python ready $(PROGS) afl-as llvm gcc_plugin test_build all_done
+all:	test_x86 test_shm test_python ready $(PROGS) afl-as llvm fault gcc_plugin test_build all_done
 	-$(MAKE) -C utils/aflpp_driver
 	@echo
 	@echo

@@ -20,6 +20,7 @@ static bool              __init_done = false;
 static bool              __afl_debug = false;
 static size_t            shm_size = FJ_SHM_DEFAULT_SIZE;
 static bool              have_fault = false;
+static bool              no_ctx = false;
 
 __attribute__((destructor)) void __fault_injection_finit() {
   if (!__init_done || !cb) return;
@@ -29,6 +30,7 @@ __attribute__((destructor)) void __fault_injection_finit() {
 __attribute__((constructor(10086))) void __fault_injection_init() {
   if (__init_done) return;
   if (getenv("AFL_DEBUG")) __afl_debug = true;
+  no_ctx = getenv("FJ_NO_CTX") != NULL;
 
   char *id = getenv(FJ_SHM_ID);
   if (!id || id[0] == '\0') {
@@ -63,11 +65,10 @@ __attribute__((constructor(10086))) void __fault_injection_init() {
 
 #define STACK_BUFFER_SIZE 64
 thread_local void *stack_buf[STACK_BUFFER_SIZE] = {NULL};
-thread_local int   stack_buf_len = 0;
 
 static inline void print_stack(uint64_t addr) {
   fprintf(stderr, "failth %d, addr 0x%lx\n", cb->hit, addr);
-  stack_buf_len = backtrace(stack_buf, STACK_BUFFER_SIZE);
+  int stack_buf_len = backtrace(stack_buf, STACK_BUFFER_SIZE);
   if (stack_buf_len > 0) {
     char **sym = backtrace_symbols(stack_buf, stack_buf_len);
     for (int i = 0; i < stack_buf_len; ++i) {
@@ -77,15 +78,19 @@ static inline void print_stack(uint64_t addr) {
   }
 }
 
-static inline void do_log(bool collect_stack) {
-  if (collect_stack) stack_buf_len = backtrace(stack_buf, STACK_BUFFER_SIZE);
-  if (stack_buf_len > 0) {
-    uint64_t  v = XXH3_64bits(stack_buf, stack_buf_len * sizeof(void *));
-    uint64_t *slot = &cb->trace_addr[cb->trace_size];
-    if ((void *)slot >= (void *)cb + shm_size) {
-      fprintf(stderr, "full track buffer\n");
-      return;
-    }
+static inline void do_log(uint64_t addr) {
+  uint64_t *slot = &cb->trace_addr[cb->trace_size];
+  if ((void *)slot >= (void *)cb + shm_size) {
+    fprintf(stderr, "full track buffer\n");
+    return;
+  }
+  if (no_ctx) {
+    *slot = addr;
+    cb->trace_size += 1;
+  } else {
+    int stack_buf_len = backtrace(stack_buf, STACK_BUFFER_SIZE);
+    if (stack_buf_len <= 0) return;
+    uint64_t v = XXH3_64bits(stack_buf, stack_buf_len * sizeof(void *));
     *slot = v;
     cb->trace_size += 1;
   }
@@ -96,7 +101,7 @@ bool __fault_injection_control() {
   uint64_t addr = (uint64_t)__builtin_return_address(0);
   cb->hit++;
   if (cb->on == 1) {
-    do_log(true);
+    do_log(addr);
     return false;
   }
 
@@ -108,7 +113,6 @@ bool __fault_injection_control() {
     if (addr == cb->enable_addr[i]) {
       have_fault = true;
       if (__afl_debug) print_stack(addr);
-      do_log(!__afl_debug);
       return true;
     }
   }
@@ -117,10 +121,9 @@ bool __fault_injection_control() {
     if (cb->hit == cb->fail_addr[i]) {
       have_fault = true;
       if (__afl_debug) print_stack(addr);
-      do_log(!__afl_debug);
       return true;
     }
   }
-  if (have_fault) do_log(true);
+  if (have_fault) do_log(addr);
   return false;
 }
