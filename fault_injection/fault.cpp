@@ -250,6 +250,10 @@ init_state_t fj_init_run(struct Manager *mgr, const char *fn, fuzz_func func,
   return mgr->init_task();
 }
 
+uint32_t fj_get_size(struct Manager *mgr) {
+  return mgr->work_queue.size();
+}
+
 run_state_t fj_next_run(struct Manager *mgr) {
   return mgr->run_next();
 }

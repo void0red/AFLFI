@@ -20,8 +20,9 @@ typedef enum init_state {
 init_state_t fj_init_run(struct Manager *mgr, const char *fn, fuzz_func func,
                          void *afl, void *buf, uint32_t len);
 
-bool fj_continue_run(struct Manager *mgr);
-void fj_save_current(struct Manager *mgr);
+uint32_t fj_get_size(struct Manager *mgr);
+bool     fj_continue_run(struct Manager *mgr);
+void     fj_save_current(struct Manager *mgr);
 
 typedef enum run_state {
   FJ_RUN_NEXT,

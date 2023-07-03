@@ -2071,6 +2071,7 @@ fault_stage:
   }
 
   afl->stage_cur = 0;
+  afl->stage_max = fj_get_size(mgr);
   while (fj_continue_run(mgr)) {
     switch (fj_next_run(mgr)) {
       case FJ_RUN_NEXT:
