@@ -277,13 +277,14 @@ class ErrorSeq:
 
 class Runner:
     shm_size = 1 << 20
+    shm_prefix = 'fj.runner.'
     max_hit = (shm_size - ctypes.sizeof(CtlBlock)) // 8
     max_fails = 16
     print(f'max {max_hit} errors')
 
     def __init__(self, idx: int = 0):
         self.id = idx
-        self.shm_name = f'fj.runner.{idx}'
+        self.shm_name = f'{self.shm_prefix}{idx}'
         self.shm = SharedMemory(self.shm_name, create=True, size=self.shm_size)
 
         self.env = os.environ.copy()
@@ -333,10 +334,16 @@ class Runner:
         self.shm.unlink()
 
 
+def find_min_id():
+    return max([int(f.removeprefix(Runner.shm_prefix)) for f in os.listdir('/dev/shm') if
+                f.startswith(Runner.shm_prefix)]) + 1
+
+
 class RunnerPool:
     def __init__(self, n: int, timeout: int):
         self.runners = asyncio.Queue(n)
-        for i in range(n):
+        sid = find_min_id()
+        for i in range(sid, sid + n):
             self.runners.put_nowait(Runner(i))
         self.timeout = timeout
         self.pending_fault = queue.Queue()
