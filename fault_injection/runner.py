@@ -311,6 +311,8 @@ class Runner:
     def read_trace(self, size: int):
         if size == 0:
             return set()
+        if size > self.max_hit:
+            size = self.max_hit
         trace = (ctypes.c_uint64 * size).from_buffer(self.shm.buf, ctypes.sizeof(CtlBlock))
         return set(trace)
 
@@ -366,11 +368,10 @@ class RunnerPool:
         return diff
 
     def __check_dup(self, l: list):
-        ll = sorted(l)
-        hs = hash(ll)
-        if hs in self.seq_hash:
+        s = hash(str(sorted(l)))
+        if s in self.seq_hash:
             return True
-        self.seq_hash.add(hs)
+        self.seq_hash.add(s)
         return False
 
     async def do_fault(self, seq: ErrorSeq, fuzz: bool = False, *args):
@@ -408,7 +409,6 @@ class RunnerPool:
             hit = max(ctl.hit, hit)
             trace.update(inst.read_trace(ctl.trace_size))
         self.runners.put_nowait(inst)
-        self.total += hit
         new_trace = self.__check_new(trace)
         if not force and not new_trace:
             logging.debug('can\'t find new points in: ' + ' '.join(cmd))
@@ -421,7 +421,7 @@ class RunnerPool:
                 tasks.append(e)
         else:
             tasks = ErrorSeq(hit).gen()
-
+        self.total += len(tasks)
         await asyncio.gather(*[self.do_fault(seq, fuzz, *cmd) for seq in tasks])
 
         while not self.pending_fault.empty():

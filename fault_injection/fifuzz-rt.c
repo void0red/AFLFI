@@ -149,6 +149,6 @@ bool __fault_injection_control(uint64_t id) {
       break;
     }
   }
-  if (__afl_debug && ret) fprintf(stderr, "fj control 0x%lx\n", id);
+//  if (__afl_debug && ret) fprintf(stderr, "fj control 0x%lx\n", id);
   return ret;
 }
