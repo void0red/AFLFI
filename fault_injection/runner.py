@@ -275,6 +275,14 @@ class ErrorSeq:
         return ret
 
 
+def find_min_id():
+    ids = [int(f.removeprefix(Runner.shm_prefix)) for f in os.listdir('/dev/shm') if
+           f.startswith(Runner.shm_prefix)]
+    if len(ids) == 0:
+        return 0
+    return max(ids) + 1
+
+
 class Runner:
     shm_size = 1 << 20
     shm_prefix = 'fj.runner.'
@@ -283,6 +291,8 @@ class Runner:
     print(f'max {max_hit} errors')
 
     def __init__(self, idx: int = 0):
+        if idx is None or idx == 0:
+            idx = find_min_id()
         self.id = idx
         self.shm_name = f'{self.shm_prefix}{idx}'
         self.shm = SharedMemory(self.shm_name, create=True, size=self.shm_size)
@@ -332,14 +342,6 @@ class Runner:
     def __del__(self):
         self.shm.close()
         self.shm.unlink()
-
-
-def find_min_id():
-    ids = [int(f.removeprefix(Runner.shm_prefix)) for f in os.listdir('/dev/shm') if
-           f.startswith(Runner.shm_prefix)]
-    if len(ids) == 0:
-        return 0
-    return max(ids) + 1
 
 
 class RunnerPool:

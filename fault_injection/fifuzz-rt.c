@@ -9,6 +9,7 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <execinfo.h>
 
 #define XXH_INLINE_ALL
 #include "../include/xxhash.h"
@@ -79,7 +80,7 @@ static struct emu_stack stack_;
 static inline void emu_stack_push(struct emu_stack *stack, uint64_t value) {
   if (stack->top == STACK_BUFFER_SIZE) {
     fprintf(stderr, "emu stack full\n");
-    exit(0);
+    return;
   }
   stack->data[stack->top++] = value;
 }
@@ -100,15 +101,18 @@ static inline uint64_t to_expect(uint8_t prefix, uint64_t value) {
          (value & ((1UL << TRACE_PREFIX_SHIFT) - 1));
 }
 
+void *stack_buf[STACK_BUFFER_SIZE] = {NULL};
+
 static inline uint64_t emu_hash(struct emu_stack *stack, uint64_t id) {
-  return XXH64(stack->data, stack->top * sizeof(uint64_t), id);
+  int size = backtrace(stack_buf, STACK_BUFFER_SIZE);
+  if (size <= 0) { exit(-1); }
+  return XXH3_64bits(stack_buf, size * sizeof(void *));
 }
 
 void __fault_injection_trace(uint64_t id) {
   if (!__init_done || !cb->on) return;
 
   uint8_t prefix = id >> TRACE_PREFIX_SHIFT;
-  bool    ok;
   switch (prefix) {
     case FuncEntry:
     case CallEntry: {
@@ -116,17 +120,16 @@ void __fault_injection_trace(uint64_t id) {
       break;
     }
     case FuncExit: {
-      ok = emu_stack_pop_until(&stack_, to_expect(FuncEntry, id));
-      if (!ok) fprintf(stderr, "want 0x%lx failed\n", to_expect(FuncEntry, id));
+      emu_stack_pop_until(&stack_, to_expect(FuncEntry, id));
       break;
     }
     case CallExit: {
-      ok = emu_stack_pop_until(&stack_, to_expect(CallEntry, id));
-      if (!ok) fprintf(stderr, "want 0x%lx failed\n", to_expect(CallEntry, id));
+      emu_stack_pop_until(&stack_, to_expect(CallEntry, id));
       break;
     }
     case ErrorCollect: {
-      cb->trace_addr[cb->trace_size++] = emu_hash(&stack_, id);
+      // collect in control
+      //      cb->trace_addr[cb->trace_size++] = emu_hash(&stack_, id);
       break;
     }
     default:
@@ -136,8 +139,10 @@ void __fault_injection_trace(uint64_t id) {
 
 bool __fault_injection_control(uint64_t id) {
   if (!__init_done || !cb->on) return false;
+  cb->hit += 1;
   uint64_t hs = emu_hash(&stack_, id);
-  bool     ret = false;
+  cb->trace_addr[cb->trace_size++] = hs;
+  bool ret = false;
   for (uint32_t i = 0; i < cb->fail_size; ++i) {
     if (cb->fail_addr[i] == hs) {
       ret = true;
