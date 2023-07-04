@@ -48,7 +48,7 @@ def collect_coverage(build_dir):
     try:
         subprocess.run(
             f'lcov --rc lcov_branch_coverage=1 --gcov-tool {gcov_file_path} -c -d {build_dir} -o report.{int(time.time())}.info',
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30, shell=True)
     except subprocess.TimeoutExpired:
         pass
 
@@ -74,7 +74,9 @@ if __name__ == '__main__':
     sys_args = parser.parse_args()
     assert Path(sys_args.out).exists()
     assert simple_check(sys_args.build)
-    subprocess.run(f'lcov -z -d {sys_args.build}', stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run(f'lcov -z -d {sys_args.build}', stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True)
+    if os.environ.get('FJ_FIFUZZ'):
+        sys_args.fuzz = True
 
     pool = RunnerPool(os.cpu_count(), 30)
     fuzzed = set()
