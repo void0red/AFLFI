@@ -82,6 +82,7 @@ if __name__ == '__main__':
     fuzzed = set()
     threading.Timer(60 * 30, collect_coverage, (sys_args.build,)).start()
     start = time.time()
+    loop = asyncio.new_event_loop()
     while True:
         cmds = get_all_cmd(sys_args.out, sys_args.bin) - fuzzed
         fuzzed.update(cmds)
@@ -89,7 +90,6 @@ if __name__ == '__main__':
             os.sched_yield()
             continue
         print(f'\nfetch {len(cmds)} new testcase')
-        loop = asyncio.new_event_loop()
         for cmd in cmds:
             loop.run_until_complete(pool.run_cmd(sys_args.fuzz, False, *cmd.split()))
         print(f'\ncost {time.time() - start}s')
