@@ -140,6 +140,10 @@ void afl_state_init(afl_state_t *afl, uint32_t map_size) {
   afl->fsrv.dev_null_fd = -1;
   afl->fsrv.child_pid = -1;
   afl->fsrv.out_dir_fd = -1;
+  afl->min_distance = -1;
+  afl->max_distance = -1;
+  afl->cur_distance = -1;
+  afl->directed_fuzz = getenv("FJ_FUZZ") != NULL;
 
   init_mopt_globals(afl);
 

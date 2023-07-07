@@ -2134,7 +2134,7 @@ int main(int argc, char **argv_orig, char **envp) {
 
   afl->argv = use_argv;
   afl->fsrv.trace_bits =
-      afl_shm_init(&afl->shm, afl->fsrv.map_size, afl->non_instrumented_mode);
+      afl_shm_init(&afl->shm, afl->fsrv.map_size + 16, afl->non_instrumented_mode);
 
   if (!afl->non_instrumented_mode && !afl->fsrv.qemu_mode &&
       !afl->unicorn_mode && !afl->fsrv.frida_mode && !afl->fsrv.cs_mode &&
@@ -2669,9 +2669,21 @@ int main(int argc, char **argv_orig, char **envp) {
     ++runs_in_current_cycle;
 
     do {
+      if (afl->directed_fuzz) {
+        double min_distance = INT_MAX;
 
-      if (likely(!afl->old_seed_selection)) {
+        struct queue_entry *cur;
+        for (u32 i = 0; i < afl->queued_items; ++i) {
+          cur = afl->queue_buf[i];
+          if (cur->disabled || cur->distance == 0) continue;
+          if (cur->distance < min_distance) {
+            min_distance = cur->distance;
+            afl->current_entry = i;
+          }
+        }
+        afl->queue_cur = afl->queue_buf[afl->current_entry];
 
+      } else if (likely(!afl->old_seed_selection)) {
         if (unlikely(prev_queued_items < afl->queued_items ||
                      afl->reinit_table)) {
 

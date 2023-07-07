@@ -16,17 +16,16 @@
 #include <llvm/Support/SourceMgr.h>
 #include <llvm/Transforms/IPO/PassManagerBuilder.h>
 #include <llvm/IR/LegacyPassManager.h>
+#include "utils.h"
 
 using namespace llvm;
 class InstPlugin {
  private:
   const char *FaultInjectionControlName = "__fault_injection_control";
   const char *FaultInjectionTraceName = "__fault_injection_trace";
-  const char *FaultInjectionDistanceName = "__fault_injection_distance";
 
   llvm::FunctionCallee FaultInjectionControlFunc;
   llvm::FunctionCallee FaultInjectionTraceFunc;
-  llvm::FunctionCallee FaultInjectionDistanceFunc;
 
   bool fifuzz{false};
   enum class InsertType {
@@ -41,13 +40,8 @@ class InstPlugin {
   llvm::MDNode      *noSanitizeNode{nullptr};
   llvm::Instruction *setNoSanitize(llvm::Instruction *v);
 
-  llvm::SmallSet<llvm::hash_code, 16>       errorLocs;
-  std::unordered_set<std::string>           errorFuncs;
-  std::unordered_map<std::string, unsigned> distance;
-
-  bool loadErrFunc(const char *name);
-  bool loadErrLoc(const char *name);
-  bool loadDistance(const char *name);
+  std::unordered_set<uint64_t>    errorLocs;
+  std::unordered_set<std::string> errorFuncs;
 
   std::unordered_map<llvm::CallInst *, uint32_t> errorSite;
   std::unordered_set<llvm::CallInst *>           callSite;
@@ -60,10 +54,6 @@ class InstPlugin {
   void InsertControl(llvm::Module *m);
 
   void InsertTrace(llvm::Module *m);
-
-  void InsertDistance(llvm::Module *m);
-
-  static llvm::hash_code getLocHash(llvm::CallInst *callInst);
 
   static uint64_t getInsertID(llvm::Instruction *inst, InsertType ty);
 
@@ -113,62 +103,6 @@ static RegisterStandardPasses Y(PassManagerBuilder::EP_OptimizerLast, X);
 
 static RegisterStandardPasses Y0(PassManagerBuilder::EP_EnabledOnOptLevel0, X);
 
-bool isIgnoreFunction(const llvm::Function *F) {
-  // Starting from "LLVMFuzzer" these are functions used in libfuzzer based
-  // fuzzing campaign installations, e.g. oss-fuzz
-
-  static constexpr const char *ignoreList[] = {
-
-      "asan.",
-      "llvm.",
-      "sancov.",
-      "__ubsan",
-      "ign.",
-      "__afl",
-      "_fini",
-      "__libc_",
-      "__asan",
-      "__msan",
-      "__cmplog",
-      "__sancov",
-      "__san",
-      "__cxx_",
-      "__decide_deferred",
-      "_GLOBAL",
-      "_ZZN6__asan",
-      "_ZZN6__lsan",
-      "msan.",
-      "LLVMFuzzerM",
-      "LLVMFuzzerC",
-      "LLVMFuzzerI",
-      "maybe_duplicate_stderr",
-      "discard_output",
-      "close_stdout",
-      "dup_and_close_stderr",
-      "maybe_close_fd_mask",
-      "ExecuteFilesOnyByOne"
-
-  };
-
-  for (auto const &ignoreListFunc : ignoreList) {
-    if (F->getName().startswith(ignoreListFunc)) { return true; }
-  }
-
-  static constexpr const char *ignoreSubstringList[] = {
-
-      "__asan", "__msan",       "__ubsan",    "__lsan",  "__san", "__sanitize",
-      "__cxx",  "DebugCounter", "DwarfDebug", "DebugLoc"
-
-  };
-
-  for (auto const &ignoreListFunc : ignoreSubstringList) {
-    // hexcoder: F->getName().contains() not avaiilable in llvm 3.8.0
-    if (StringRef::npos != F->getName().find(ignoreListFunc)) { return true; }
-  }
-
-  return false;
-}
-
 llvm::Instruction *InstPlugin::setNoSanitize(llvm::Instruction *v) {
   v->setMetadata(noSanitizeKindId, noSanitizeNode);
   return v;
@@ -176,16 +110,12 @@ llvm::Instruction *InstPlugin::setNoSanitize(llvm::Instruction *v) {
 
 void InstPlugin::runOnModule(llvm::Module &M) {
   if (auto *f = getenv("FJ_FUNC")) {
-    loadErrFunc(f);
+    ReadErrFunc(f, errorFuncs);
     printf("Load %ld from %s\n", errorFuncs.size(), f);
   }
   if (auto *f = getenv("FJ_LOC")) {
-    loadErrLoc(f);
+    ReadErrLoc(f, errorLocs);
     printf("Load %ld from %s\n", errorLocs.size(), f);
-  }
-  if (auto *f = getenv("FJ_DIS")) {
-    loadDistance(f);
-    printf("Load %ld from %s\n", distance.size(), f);
   }
 
   if (errorLocs.empty() && errorFuncs.empty()) return;
@@ -213,28 +143,10 @@ void InstPlugin::runOnModule(llvm::Module &M) {
   InsertControl(&M);
 }
 
-hash_code InstPlugin::getLocHash(llvm::CallInst *callInst) {
-  auto *Func = callInst->getParent();
-  auto *Callee =
-      dyn_cast<Function>(callInst->getCalledOperand()->stripPointerCasts());
-  std::string fn, cn;
-  if (Func->hasName()) { fn = Func->getName().str(); }
-  if (Callee->hasName()) { cn = Callee->getName().str(); }
-  auto ret = llvm::hash_combine(llvm::hash_value(fn), llvm::hash_value(cn));
-  if (DILocation *Loc = callInst->getDebugLoc()) {
-    StringRef Dir = Loc->getDirectory();
-    StringRef File = Loc->getFilename();
-    unsigned  Line = Loc->getLine();
-    return llvm::hash_combine(ret, llvm::hash_value(Dir),
-                              llvm::hash_value(File), llvm::hash_value(Line));
-  }
-  return ret;
-}
-
 void InstPlugin::CollectInsertPoint(llvm::Module *m) {
   for (auto &func : m->functions()) {
     int counter = 0;
-    if (func.empty() || func.isIntrinsic() || isIgnoreFunction(&func)) continue;
+    if (func.empty() || func.isIntrinsic() || IsIgnoreFunction(&func)) continue;
 
     auto *entry = &*func.getEntryBlock().getFirstInsertionPt();
     for (auto &inst : instructions(func)) {
@@ -250,7 +162,7 @@ void InstPlugin::CollectInsertPoint(llvm::Module *m) {
       auto *callee =
           dyn_cast<Function>(callInst->getCalledOperand()->stripPointerCasts());
       if (!callee || callee->isIntrinsic() || !callee->hasName() ||
-          isIgnoreFunction(callee))
+          IsIgnoreFunction(callee))
         continue;
 
       if (fifuzz) callSite.insert(callInst);
@@ -268,7 +180,7 @@ void InstPlugin::CollectInsertPoint(llvm::Module *m) {
       DILocation *Loc = callInst->getDebugLoc();
       if (!Loc) continue;
 
-      if (errorLocs.count(getLocHash(callInst))) {
+      if (errorLocs.count(LocHash(callInst))) {
         errorSite[callInst] = counter++;
         callSite.erase(callInst);
       }
@@ -362,55 +274,4 @@ void InstPlugin::InsertTrace(llvm::Module *m) {
                      (v >> 8)));
     setNoSanitize(call2);
   }
-}
-
-bool InstPlugin::loadErrFunc(const char *name) {
-  if (name == nullptr) return false;
-  std::ifstream f(name);
-  if (!f.is_open()) return false;
-
-  std::string buf;
-  while (std::getline(f, buf)) {
-    StringRef bufp(buf);
-    if (bufp.startswith("#")) continue;
-    auto idx = bufp.find(',');
-    if (idx != StringRef::npos) bufp = bufp.substr(0, idx);
-    errorFuncs.insert(bufp.trim().str());
-  }
-  return true;
-}
-
-bool InstPlugin::loadErrLoc(const char *name) {
-  if (name == nullptr) return false;
-  std::ifstream f(name);
-  if (!f.is_open()) return false;
-
-  std::string buf;
-  while (std::getline(f, buf)) {
-    StringRef bufp(buf);
-    if (bufp.startswith("#")) continue;
-    auto idx = bufp.find(',');
-    if (idx != StringRef::npos) bufp = bufp.substr(0, idx);
-    unsigned long long v = 0;
-    if (getAsUnsignedInteger(bufp.trim(), 10, v)) continue;
-    errorLocs.insert({v});
-  }
-  return true;
-}
-
-bool InstPlugin::loadDistance(const char *name) {
-  if (name == nullptr) return false;
-  std::ifstream f(name);
-  if (!f.is_open()) return false;
-
-  std::string buf;
-  while (std::getline(f, buf)) {
-    StringRef bufp(buf);
-    auto      i = bufp.split(',');
-    if (i.second.empty()) continue;
-    unsigned long long dis = 0;
-    if (getAsUnsignedInteger(i.second.trim(), 10, dis)) continue;
-    distance[i.first.trim().str()] = dis;
-  }
-  return true;
 }

@@ -599,3 +599,31 @@ unsigned long long int calculateCollisions(uint32_t edges) {
   return collisions;
 
 }
+
+void loadDistance(std::unordered_map<uint64_t, uint64_t> &out) {
+  auto fn = getenv("FJ_DIS");
+  if (fn == nullptr) return;
+  std::ifstream f(fn);
+  std::string   line;
+  if (!f.is_open()) return;
+  while (std::getline(f, line)) {
+    auto idx = line.find(',');
+    if (idx == std::string::npos) continue;
+    auto hs = std::stoull(line.substr(0, idx));
+    auto dis = std::stoull(line.substr(idx + 1));
+    out[hs] = dis;
+  }
+}
+
+llvm::hash_code LocHash(const llvm::Instruction *inst) {
+  if (llvm::DILocation *Loc = inst->getDebugLoc()) {
+    auto     dir = Loc->getDirectory();
+    auto     file = Loc->getFilename();
+    unsigned line = Loc->getLine();
+    return llvm::hash_combine(llvm::hash_value(dir), llvm::hash_value(file),
+                              llvm::hash_value(line),
+                              llvm::hash_value(inst->getType()->getTypeID()));
+  }
+  llvm::errs() << "Please Check project debug info\n";
+  return 0;
+}

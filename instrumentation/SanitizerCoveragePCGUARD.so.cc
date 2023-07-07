@@ -200,6 +200,7 @@ class ModuleSanitizerCoverageAFL
   ConstantInt    *One = NULL;
   ConstantInt    *Zero = NULL;
 
+  std::unordered_map<uint64_t, uint64_t> distance;
 };
 
 }  // namespace
@@ -226,6 +227,7 @@ llvmGetPassPluginInfo() {
 
 PreservedAnalyses ModuleSanitizerCoverageAFL::run(Module                &M,
                                                   ModuleAnalysisManager &MAM) {
+  loadDistance(distance);
   ModuleSanitizerCoverageAFL ModuleSancov(Options);
   auto &FAM = MAM.getResult<FunctionAnalysisManagerModuleProxy>(M).getManager();
   auto  DTCallback = [&FAM](Function &F) -> const DominatorTree  *{
@@ -1175,6 +1177,27 @@ void ModuleSanitizerCoverageAFL::InjectCoverageAtBlock(Function   &F,
 #else
   IRBuilder<> IRB(&*IP);
 #endif
+  auto dis = distance[LocHash(BB.getFirstNonPHIOrDbg())];
+  if (dis > 0) {
+    auto *DisPtr = IRB.CreateIntToPtr(
+        IRB.CreateAdd(IRB.CreatePointerCast(AFLMapPtr, IRB.getInt8PtrTy()),
+                      ConstantInt::get(IRB.getInt8PtrTy(), 64)),
+        PointerType::getUnqual(IRB.getInt64Ty()));
+    auto *DisLoad = IRB.CreateLoad(IRB.getInt64Ty(), DisPtr);
+    auto *DisStore = IRB.CreateStore(
+        IRB.CreateAdd(DisLoad, ConstantInt::get(IRB.getInt64Ty(), dis)), DisPtr);
+    auto *DisCntPtr = IRB.CreateIntToPtr(
+        IRB.CreateAdd(IRB.CreatePointerCast(AFLMapPtr, IRB.getInt8PtrTy()),
+                      ConstantInt::get(IRB.getInt8PtrTy(), 64 + 8)),
+        PointerType::getUnqual(IRB.getInt64Ty()));
+    auto *DisCntLoad = IRB.CreateLoad(IRB.getInt64Ty(), DisCntPtr);
+    auto *DisCntStore = IRB.CreateStore(
+        IRB.CreateAdd(DisCntLoad, ConstantInt::get(IRB.getInt64Ty(), 1)), DisCntPtr);
+    ModuleSanitizerCoverageAFL::SetNoSanitizeMetadata(DisLoad);
+    ModuleSanitizerCoverageAFL::SetNoSanitizeMetadata(DisStore);
+    ModuleSanitizerCoverageAFL::SetNoSanitizeMetadata(DisCntLoad);
+    ModuleSanitizerCoverageAFL::SetNoSanitizeMetadata(DisCntStore);
+  }
   if (EntryLoc) IRB.SetCurrentDebugLocation(EntryLoc);
   if (Options.TracePCGuard) {
 

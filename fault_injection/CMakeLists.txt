@@ -29,7 +29,17 @@ else ()
     message(STATUS "use LLVM static link")
 endif ()
 
-add_executable(analyzer analyzer.cpp)
+include_directories(.)
+#add_library(graph INTERFACE)
+#target_compile_definitions(graph INTERFACE -DMINIMAL_PRINTOUT)
+#target_include_directories(graph INTERFACE
+#        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+#        $<INSTALL_INTERFACE:include>)
+
+add_executable(analyzer analyzer.cpp utils.cpp)
 llvm_config(analyzer ${USE_SHARED} support core irreader passes)
 
-add_library(inst SHARED inst.cpp)
+add_library(inst SHARED inst.cpp utils.cpp)
+
+add_executable(distance distance.cpp utils.cpp)
+llvm_config(distance ${USE_SHARED} support core irreader passes)

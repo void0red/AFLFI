@@ -10,19 +10,16 @@
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Passes/PassPlugin.h>
 #include <llvm/Support/CommandLine.h>
-#include <condition_variable>
 #include <fstream>
-#include <functional>
-#include <future>
 #include <memory>
 #include <mutex>
-#include <queue>
 #include <sstream>
 #include <stdexcept>
-#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include "threadpool.h"
+#include "utils.h"
 
 static std::vector<const char *> blackList{
     "bcmp",    "memchr",      "memchr_inv", "memcmp",  "memscan",
@@ -33,81 +30,6 @@ static std::vector<const char *> blackList{
     "strrchr", "strscpy",     "strsep",     "strspn",  "strstr",
     "strtok",  "atoi",        "printf",     "scanf",   "memcpy",
     "memmove", "atol",        "strto",
-};
-
-class ThreadPool {
- public:
-  ThreadPool(size_t threads) : stop(false) {
-    for (size_t i = 0; i < threads; ++i)
-      workers.emplace_back([this] {
-        for (;;) {
-          std::function<void()> task;
-
-          {
-            std::unique_lock<std::mutex> lock(this->queue_mutex);
-            this->condition.wait(
-                lock, [this] { return this->stop || !this->tasks.empty(); });
-            if (this->stop && this->tasks.empty()) return;
-            task = std::move(this->tasks.front());
-            this->tasks.pop();
-          }
-
-          task();
-          task_size.fetch_sub(1);
-          done.notify_one();
-        }
-      });
-  }
-
-  template <class F, class... Args>
-  auto enqueue(F &&f, Args &&...args)
-      -> std::future<typename std::result_of<F(Args...)>::type> {
-    using return_type = typename std::result_of<F(Args...)>::type;
-
-    auto task = std::make_shared<std::packaged_task<return_type()>>(
-        std::bind(std::forward<F>(f), std::forward<Args>(args)...));
-
-    std::future<return_type> res = task->get_future();
-    {
-      std::unique_lock<std::mutex> lock(queue_mutex);
-
-      // don't allow enqueueing after stopping the pool
-      if (stop) throw std::runtime_error("enqueue on stopped ThreadPool");
-
-      tasks.emplace([task]() { (*task)(); });
-      task_size.fetch_add(1);
-    }
-    condition.notify_one();
-    return res;
-  }
-
-  void join() {
-    {
-      std::unique_lock<std::mutex> lock(queue_mutex);
-      stop = true;
-    }
-    condition.notify_all();
-    for (std::thread &worker : workers)
-      worker.join();
-  }
-
-  void wait() {
-    std::unique_lock<std::mutex> lock(queue_mutex);
-    done.wait(lock, [this] { return task_size == 0; });
-  }
-
- private:
-  // need to keep track of threads so we can join them
-  std::vector<std::thread> workers;
-  // the task queue
-  std::queue<std::function<void()>> tasks;
-
-  // synchronization
-  std::mutex              queue_mutex;
-  std::condition_variable condition;
-  bool                    stop;
-  std::atomic<uint32_t>   task_size;
-  std::condition_variable done;
 };
 
 using namespace llvm;
@@ -157,21 +79,7 @@ struct ErrorHandler {
   }
 
   hash_code getLocHash() const {
-    auto *Func = callInst->getParent();
-    auto *Callee =
-        dyn_cast<Function>(callInst->getCalledOperand()->stripPointerCasts());
-    std::string fn, cn;
-    if (Func->hasName()) { fn = Func->getName().str(); }
-    if (Callee->hasName()) { cn = Callee->getName().str(); }
-    auto ret = llvm::hash_combine(llvm::hash_value(fn), llvm::hash_value(cn));
-    if (DILocation *Loc = callInst->getDebugLoc()) {
-      StringRef Dir = Loc->getDirectory();
-      StringRef File = Loc->getFilename();
-      unsigned  Line = Loc->getLine();
-      return llvm::hash_combine(ret, llvm::hash_value(Dir),
-                                llvm::hash_value(File), llvm::hash_value(Line));
-    }
-    return ret;
+    return LocHash(callInst);
   }
 
   double similarity(ErrorHandler *other) {
@@ -616,16 +524,6 @@ struct Analyzer : AnalysisInfoMixin<Analyzer> {
 
 AnalysisKey Analyzer::Key;
 
-static void ReadLists(const std::string &list, std::vector<std::string> &out) {
-  std::ifstream f(list);
-  std::string   line;
-  if (f.is_open()) {
-    while (std::getline(f, line)) {
-      out.push_back(line);
-    }
-  }
-}
-
 class Runner {
   std::vector<std::unique_ptr<Module>> modules;
   ThreadPool                           pool;
@@ -776,10 +674,6 @@ class Runner {
     for (auto &fn : definedFuncs) {
       OS << fn << '\n';
     }
-  }
-
-  ~Runner() {
-    pool.join();
   }
 };
 

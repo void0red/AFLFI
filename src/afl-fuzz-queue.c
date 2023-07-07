@@ -596,6 +596,18 @@ void add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passed_det) {
   q->testcase_buf = NULL;
   q->mother = afl->queue_cur;
 
+  q->distance = afl->cur_distance;
+  if (afl->cur_distance > 0) {
+    if (afl->max_distance <= 0) {
+      afl->max_distance = afl->cur_distance;
+      afl->min_distance = afl->min_distance;
+    }
+    if (afl->cur_distance > afl->max_distance)
+      afl->max_distance = afl->cur_distance;
+    if (afl->cur_distance < afl->min_distance)
+      afl->min_distance = afl->cur_distance;
+  }
+
 #ifdef INTROSPECTION
   q->bitsmap_size = afl->bitsmap_size;
 #endif

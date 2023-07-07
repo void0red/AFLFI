@@ -113,7 +113,7 @@ if __name__ == '__main__':
         new_args = [clang] + sys.argv[1:]
     elif env.get('AFL_USE_ASAN') or env.get('AFL_USE_UBSAN'):
         new_args = handle_afl_mode(sys.argv)
-    elif env.get('FJ_FUNC') or env.get('FJ_LOC') or env.get('FJ_COV'):
+    elif env.get('FJ_FUNC') or env.get('FJ_LOC') or env.get('FJ_DIS'):
         new_args = handle_fault_mode(sys.argv, False if env.get('FJ_FIFUZZ') is None else True)
     else:
         new_args = handle_bitcode_mode(sys.argv)

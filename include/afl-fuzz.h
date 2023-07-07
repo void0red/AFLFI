@@ -204,6 +204,7 @@ struct queue_entry {
 
   struct queue_entry *mother;           /* queue entry this based on        */
 
+  double distance;
 };
 
 struct extra_data {
@@ -786,6 +787,10 @@ typedef struct afl_state {
   u32   bitsmap_size;
 #endif
 
+  double cur_distance;
+  double max_distance;
+  double min_distance;
+  bool   directed_fuzz;
 } afl_state_t;
 
 struct custom_mutator {

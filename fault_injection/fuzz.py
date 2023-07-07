@@ -81,7 +81,7 @@ if __name__ == '__main__':
     pool = RunnerPool(os.cpu_count(), 30)
     fuzzed = set()
     threading.Timer(60 * 30, collect_coverage, (sys_args.build,)).start()
-    start = time.time()
+    total_time = 0
     loop = asyncio.new_event_loop()
     while True:
         cmds = get_all_cmd(sys_args.out, sys_args.bin) - fuzzed
@@ -90,6 +90,8 @@ if __name__ == '__main__':
             os.sched_yield()
             continue
         print(f'\nfetch {len(cmds)} new testcase')
+        start = time.time()
         for cmd in cmds:
             loop.run_until_complete(pool.run_cmd(sys_args.fuzz, False, *cmd.split()))
-        print(f'\ncost {time.time() - start}s')
+        total_time += time.time() - start
+        print(f'\ncost {time.time() - start}s/{int(total_time)}s')

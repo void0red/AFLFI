@@ -81,7 +81,7 @@ namespace {
 
 #if LLVM_VERSION_MAJOR >= 11                        /* use new pass manager */
 class AFLCoverage : public PassInfoMixin<AFLCoverage> {
-
+std::unordered_map<uint64_t, uint64_t> distance;
  public:
   AFLCoverage() {
 
@@ -192,7 +192,7 @@ uint64_t PowerOf2Ceil(unsigned in) {
 
 #if LLVM_VERSION_MAJOR >= 11                        /* use new pass manager */
 PreservedAnalyses AFLCoverage::run(Module &M, ModuleAnalysisManager &MAM) {
-
+  loadDistance(distance);
 #else
 bool AFLCoverage::runOnModule(Module &M) {
 
@@ -529,6 +529,33 @@ bool AFLCoverage::runOnModule(Module &M) {
 
       BasicBlock::iterator IP = BB.getFirstInsertionPt();
       IRBuilder<>          IRB(&(*IP));
+
+      auto dis = distance[LocHash(BB.getFirstNonPHIOrDbg())];
+      if (dis > 0) {
+        auto *DisPtr = IRB.CreateIntToPtr(
+            IRB.CreateAdd(IRB.CreatePointerCast(AFLMapPtr, IRB.getInt8PtrTy()),
+                          ConstantInt::get(IRB.getInt8PtrTy(), 64)),
+            PointerType::getUnqual(IRB.getInt64Ty()));
+        auto *DisLoad = IRB.CreateLoad(IRB.getInt64Ty(), DisPtr);
+        auto *DisStore = IRB.CreateStore(
+            IRB.CreateAdd(DisLoad, ConstantInt::get(IRB.getInt64Ty(), dis)),
+            DisPtr);
+        auto *DisCntPtr = IRB.CreateIntToPtr(
+            IRB.CreateAdd(IRB.CreatePointerCast(AFLMapPtr, IRB.getInt8PtrTy()),
+                          ConstantInt::get(IRB.getInt8PtrTy(), 64 + 8)),
+            PointerType::getUnqual(IRB.getInt64Ty()));
+        auto *DisCntLoad = IRB.CreateLoad(IRB.getInt64Ty(), DisCntPtr);
+        auto *DisCntStore = IRB.CreateStore(
+            IRB.CreateAdd(DisCntLoad, ConstantInt::get(IRB.getInt64Ty(), 1)),
+            DisCntPtr);
+        DisLoad->setMetadata(M.getMDKindID("nosanitize"), MDNode::get(C, None));
+        DisStore->setMetadata(M.getMDKindID("nosanitize"),
+                              MDNode::get(C, None));
+        DisCntLoad->setMetadata(M.getMDKindID("nosanitize"),
+                                MDNode::get(C, None));
+        DisCntStore->setMetadata(M.getMDKindID("nosanitize"),
+                                 MDNode::get(C, None));
+      }
 
       // Context sensitive coverage
       if (instrument_ctx && &BB == &F.getEntryBlock()) {

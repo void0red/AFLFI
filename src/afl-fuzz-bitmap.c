@@ -209,6 +209,16 @@ inline u8 has_new_bits(afl_state_t *afl, u8 *virgin_map) {
   u64 *current = (u64 *)afl->fsrv.trace_bits;
   u64 *virgin = (u64 *)virgin_map;
 
+
+    /* Calculate distance of current input to targets */
+    u64* total_distance = (u64*) (current + afl->fsrv.map_size);
+    u64* total_count = (u64*) (current + afl->fsrv.map_size + 8);
+
+    if (*total_count > 0)
+      afl->cur_distance = (double) (*total_distance) / (double) (*total_count);
+    else
+      afl->cur_distance = -1.0;
+
   u32 i = ((afl->fsrv.real_map_size + 7) >> 3);
 
 #else

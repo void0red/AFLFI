@@ -65,5 +65,9 @@ IS_EXTERN int be_quiet;
 
 #undef IS_EXTERN
 
+#include <unordered_map>
+void            loadDistance(std::unordered_map<uint64_t, uint64_t> &out);
+llvm::hash_code LocHash(const llvm::Instruction *inst);
+
 #endif
 
