@@ -80,8 +80,8 @@ if __name__ == '__main__':
         assert Path(args.funcs).exists()
         defined_funcs = read_defined_funcs(args.funcs)
 
-    loc_file = open('build/loc.txt', 'w')
-    func_file = open('build/func.txt', 'w')
+    loc_file = open('loc.txt', 'w')
+    func_file = open('func.txt', 'w')
     old_func, old_loc, new_func, new_loc = 0, 0, 0, 0
     for i in funcs:
         if i.name in defined_funcs:

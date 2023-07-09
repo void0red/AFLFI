@@ -85,21 +85,16 @@ class Runner {
     for (auto &pair : CGA) {
       if (!pair.first) continue;
       auto to = pair.second->getFunction();
-      if (pair.first->isIntrinsic() || to->isIntrinsic()) continue;
+      if (pair.first->isIntrinsic() || to->isIntrinsic() || !pair.first->hasName()) continue;
       callGraph.AddEdge(pair.first, pair.second->getFunction(), 1);
+      auto fn = pair.first->getName().str();
+      if (targetFuncName.find(fn) != targetFuncName.end()) {
+          targetFunc.insert(pair.first);
+      }
       if (pair.first->isDeclaration()) {
-        if (pair.first->hasName()) {
-          auto fn = pair.first->getName().str();
           declareFunc[fn].insert(pair.first);
-        }
       } else {
-        if (pair.first->hasName()) {
-          auto fn = pair.first->getName().str();
-          definedFunc[fn].insert(pair.first);
-          if (targetFuncName.find(fn) != targetFuncName.end()) {
-            targetFunc.insert(pair.first);
-          }
-        }
+        definedFunc[fn].insert(pair.first);
       }
     }
 
@@ -241,6 +236,7 @@ class Runner {
       if (loadFile(file)) counter++;
     }
     buildGraphFinal();
+    dbgs() << "target Func: " << targetFunc.size() << " target BB: " << targetBB.size() << '\n';
   }
 
   void execute() {

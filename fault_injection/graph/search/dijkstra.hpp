@@ -170,10 +170,10 @@ class Dijkstra {
     // reconstruct path
     //-----------------------------------------------------------------------//
     if (found_path) {
-      std::cout << "path found with cost " << goal_vtx->g_cost << std::endl;
+      // std::cout << "path found with cost " << goal_vtx->g_cost << std::endl;
       return utils::ReconstructPath(start_vtx, goal_vtx);
     }
-    std::cout << "failed to find a path" << std::endl;
+    // std::cout << "failed to find a path" << std::endl;
     return PathType();
   };
 };
