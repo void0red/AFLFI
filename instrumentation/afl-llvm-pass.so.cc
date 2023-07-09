@@ -530,8 +530,10 @@ bool AFLCoverage::runOnModule(Module &M) {
       BasicBlock::iterator IP = BB.getFirstInsertionPt();
       IRBuilder<>          IRB(&(*IP));
 
-      auto dis = distance[LocHash(BB.getFirstNonPHIOrDbg())];
-      if (dis > 0) {
+      uint64_t hs;
+      auto     valid = BasicBlockHash(&BB, hs);
+      auto     dis = distance[hs];
+      if (dis > 0 && valid) {
         auto *DisPtr = IRB.CreateIntToPtr(
             IRB.CreateAdd(IRB.CreatePointerCast(AFLMapPtr, IRB.getInt8PtrTy()),
                           ConstantInt::get(IRB.getInt8PtrTy(), 64)),

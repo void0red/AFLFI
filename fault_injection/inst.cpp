@@ -179,8 +179,9 @@ void InstPlugin::CollectInsertPoint(llvm::Module *m) {
 
       DILocation *Loc = callInst->getDebugLoc();
       if (!Loc) continue;
-
-      if (errorLocs.count(LocHash(callInst))) {
+      uint64_t hs;
+      if (!LocHash(callInst, hs)) continue;
+      if (errorLocs.count(hs)) {
         errorSite[callInst] = counter++;
         callSite.erase(callInst);
       }

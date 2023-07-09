@@ -108,7 +108,8 @@ class Runner {
           if (auto *callInst = dyn_cast<CallInst>(&Inst)) {
             auto *callee = callInst->getCalledFunction();
             if (!callee || callee->isIntrinsic()) continue;
-            auto hs = LocHash(callInst);
+            uint64_t hs;
+            if (!LocHash(callInst, hs)) continue;
             if (targetLocHash.find(hs) != targetLocHash.end()) {
               targetBB.insert(&BB);
               targetFunc.insert(&Func);
@@ -186,7 +187,8 @@ class Runner {
       };
 
       for (auto &BB : Func) {
-        auto hs = LocHash(BB.getFirstNonPHIOrDbg());
+        uint64_t hs;
+        if (!BasicBlockHash(&BB, hs)) continue;
         auto dis = getDistance(&BB);
         if (dis != -1) {
           distance[hs] = dis * 1000;

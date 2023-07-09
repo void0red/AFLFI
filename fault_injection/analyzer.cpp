@@ -78,10 +78,6 @@ struct ErrorHandler {
     checked = true;
   }
 
-  hash_code getLocHash() const {
-    return LocHash(callInst);
-  }
-
   double similarity(ErrorHandler *other) {
     if (this == other) return 0;
 
@@ -651,21 +647,24 @@ class Runner {
   }
 
   void dump_analyzer_log(llvm::raw_ostream &OS) {
-    char buf[16];
+    char     buf[16];
+    uint64_t hs;
     for (auto &pair : errFuncs) {
       OS << "# " << pair.first << ',' << checked[pair.first].size() << ','
          << unchecked[pair.first].size() << ',';
       snprintf(buf, sizeof(buf), "%0.3lf", pair.second);
       OS << buf << '\n';
       for (auto eh : unchecked[pair.first]) {
-        OS << eh->getLocHash() << ',';
+        if (!LocHash(eh->callInst, hs)) continue;
+        OS << hs << ',';
         auto &loc = eh->callInst->getDebugLoc();
         loc.print(OS);
         OS << '\n';
       }
       for (auto eh : checked[pair.first]) {
+        if (!LocHash(eh->callInst, hs)) continue;
         snprintf(buf, sizeof(buf), "%0.3lf", sims[eh]);
-        OS << eh->getLocHash() << ',' << buf << '\n';
+        OS << hs << ',' << buf << '\n';
       }
     }
   }

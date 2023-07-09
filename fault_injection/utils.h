@@ -14,5 +14,6 @@ void ReadLists(const std::string &list, std::vector<std::string> &out);
 void ReadErrFunc(const std::string &name, std::unordered_set<std::string> &out);
 void ReadErrLoc(const std::string &name, std::unordered_set<uint64_t> &out);
 bool IsIgnoreFunction(const llvm::Function *F);
-llvm::hash_code LocHash(const llvm::Instruction *inst);
+bool LocHash(const llvm::Instruction *inst, uint64_t &out);
+bool BasicBlockHash(const llvm::BasicBlock *bb, uint64_t &out);
 #endif  // ANALYZER_UTILS_H

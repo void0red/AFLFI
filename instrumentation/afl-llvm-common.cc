@@ -615,15 +615,38 @@ void loadDistance(std::unordered_map<uint64_t, uint64_t> &out) {
   }
 }
 
-llvm::hash_code LocHash(const llvm::Instruction *inst) {
+bool LocHash(const llvm::Instruction *inst, uint64_t &out) {
   if (llvm::DILocation *Loc = inst->getDebugLoc()) {
     auto     dir = Loc->getDirectory();
     auto     file = Loc->getFilename();
     unsigned line = Loc->getLine();
-    return llvm::hash_combine(llvm::hash_value(dir), llvm::hash_value(file),
-                              llvm::hash_value(line),
-                              llvm::hash_value(inst->getType()->getTypeID()));
+    if (file.empty()) {
+      auto inlineLoc = Loc->getInlinedAt();
+      if (inlineLoc) {
+        line = inlineLoc->getLine();
+        file = inlineLoc->getFilename();
+        dir = inlineLoc->getDirectory();
+      }
+    }
+    out = llvm::hash_combine(llvm::hash_value(dir), llvm::hash_value(file),
+                             llvm::hash_value(line),
+                             llvm::hash_value(inst->getType()->getTypeID()));
+    return true;
   }
-  llvm::errs() << "Please Check project debug info\n";
-  return 0;
+  llvm::errs() << "Check Debug Info: ";
+  inst->print(llvm::errs());
+  llvm::errs() << '\n';
+  return false;
+}
+
+bool BasicBlockHash(const llvm::BasicBlock *bb, uint64_t &out) {
+  for (auto &inst : *bb) {
+    if (inst.getDebugLoc()) {
+      return LocHash(&inst, out);
+    }
+  }
+  llvm::errs() << "Check Debug Info: \n";
+  bb->print(llvm::errs());
+  llvm::errs() << '\n';
+  return false;
 }
