@@ -83,6 +83,7 @@ class Runner {
     // build sub callgraph
     auto &CGA = MAM.getResult<CallGraphAnalysis>(*M);
     for (auto &pair : CGA) {
+      if (!pair.first) continue;
       auto to = pair.second->getFunction();
       if (pair.first->isIntrinsic() || to->isIntrinsic()) continue;
       callGraph.AddEdge(pair.first, pair.second->getFunction(), 1);
@@ -176,7 +177,7 @@ class Runner {
             }
           }
         }
-        bbDistance[&BB] = min_avg;
+        if (min_avg > 0) bbDistance[&BB] = min_avg;
       }
 
       auto getDistance = [&](BasicBlock *bb) -> double {
@@ -190,6 +191,7 @@ class Runner {
         uint64_t hs;
         if (!BasicBlockHash(&BB, hs)) continue;
         auto dis = getDistance(&BB);
+        if (dis == 0) continue;
         if (dis != -1) {
           distance[hs] = dis * 1000;
         } else {
@@ -197,20 +199,28 @@ class Runner {
           int cnt = 0;
 
           std::vector<std::pair<BasicBlock *, int>> succs;
-          for (auto bb : successors(&BB))
+          std::unordered_set<BasicBlock*> visited;
+          for (auto bb : successors(&BB)) {
+            visited.insert(bb);
             succs.emplace_back(bb, 1);
+          }
+            
 
           while (!succs.empty()) {
             auto pair = succs.back();
             succs.pop_back();
-            for (auto succ : successors(pair.first))
+            for (auto succ : successors(pair.first)) {
+              if (visited.find(succ) != visited.end())
+                continue;
+              visited.insert(succ);
               succs.emplace_back(succ, pair.second + 1);
+            }
             auto tmp_dis = getDistance(pair.first);
             if (tmp_dis == -1) continue;
             dis += 1.0 / (1.0 + dis + pair.second);
             cnt += 1;
           }
-
+          if (dis == 0) continue;
           distance[hs] = cnt / dis * 1000;
         }
       }
@@ -231,16 +241,22 @@ class Runner {
       if (loadFile(file)) counter++;
     }
     buildGraphFinal();
-    dbgs() << "parse " << counter << " files, target func " << targetFunc.size()
-           << ", target loc " << targetBB.size() << '\n';
   }
 
   void execute() {
+    std::mutex mu;
+    int task = 0;
+    std::vector<std::future<void>> res;
     for (auto &m : modules) {
       auto *ptr = m.get();
-      pool.enqueue([this, ptr] { this->processModule(ptr); });
+      res.emplace_back(pool.enqueue([this, ptr, &task, &mu] { 
+        this->processModule(ptr);
+        std::unique_lock<std::mutex> lock(mu);
+        task += 1;
+        dbgs() << "\rtask done " << task << "/" << modules.size();
+      }));
     }
-    pool.wait();
+    pool.wait(res);
   }
 
   void dump_distance(llvm::raw_ostream &OS) {

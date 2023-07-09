@@ -621,12 +621,13 @@ class Runner {
   }
 
   void execute() {
+    std::vector<std::future<void>> res;
     for (auto &m : modules) {
       auto *ptr = m.get();
-      pool.enqueue([this, ptr] { this->runOnModule(ptr); });
+      res.emplace_back(pool.enqueue([this, ptr] { this->runOnModule(ptr); }));
     }
-    pool.wait();
-
+    pool.wait(res);
+    res.clear();
     // calc checked percentage
     for (auto &pair : checked) {
       auto   c = pair.second.size();
@@ -635,7 +636,8 @@ class Runner {
       errFuncs.emplace_back(pair.first, v);
 
       auto &ehs = pair.second;
-      pool.enqueue([this, ehs] { this->calcSimilarity(ehs); });
+      res.emplace_back(
+          pool.enqueue([this, ehs] { this->calcSimilarity(ehs); }));
     }
 
     using elem = decltype(errFuncs)::value_type;
@@ -643,7 +645,7 @@ class Runner {
               [](const elem &a, const elem &b) { return a.second > b.second; });
 
     // calc similarity
-    pool.wait();
+    pool.wait(res);
   }
 
   void dump_analyzer_log(llvm::raw_ostream &OS) {
