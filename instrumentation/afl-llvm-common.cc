@@ -633,9 +633,6 @@ bool LocHash(const llvm::Instruction *inst, uint64_t &out) {
                              llvm::hash_value(inst->getType()->getTypeID()));
     return true;
   }
-  llvm::errs() << "Check Debug Info: ";
-  inst->print(llvm::errs());
-  llvm::errs() << '\n';
   return false;
 }
 
@@ -645,8 +642,5 @@ bool BasicBlockHash(const llvm::BasicBlock *bb, uint64_t &out) {
       return LocHash(&inst, out);
     }
   }
-  llvm::errs() << "Check Debug Info: \n";
-  bb->print(llvm::errs());
-  llvm::errs() << '\n';
   return false;
 }
