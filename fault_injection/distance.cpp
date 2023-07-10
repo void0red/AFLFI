@@ -1,22 +1,22 @@
 //
 // Created by void0red on 23-7-5.
 //
-#include <llvm/Support/CommandLine.h>
-#include <llvm/IR/Instructions.h>
+#include <llvm/Analysis/CallGraph.h>
 #include <llvm/IR/DebugInfo.h>
 #include <llvm/IR/DebugLoc.h>
-#include <llvm/Support/SourceMgr.h>
-#include <llvm/IRReader/IRReader.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
+#include <llvm/IRReader/IRReader.h>
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Passes/PassPlugin.h>
-#include <llvm/Analysis/CallGraph.h>
+#include <llvm/Support/CommandLine.h>
+#include <llvm/Support/SourceMgr.h>
 #include <fstream>
 #include <unordered_map>
-#include "threadpool.h"
-#include "utils.h"
 #include "graph/graph.hpp"
 #include "graph/search/dijkstra.hpp"
+#include "threadpool.h"
+#include "utils.h"
 
 using namespace llvm;
 static cl::OptionCategory   DefaultCat("default category");
@@ -85,14 +85,16 @@ class Runner {
     for (auto &pair : CGA) {
       if (!pair.first) continue;
       auto to = pair.second->getFunction();
-      if (pair.first->isIntrinsic() || to->isIntrinsic() || !pair.first->hasName()) continue;
+      if (pair.first->isIntrinsic() || to->isIntrinsic() ||
+          !pair.first->hasName())
+        continue;
       callGraph.AddEdge(pair.first, pair.second->getFunction(), 1);
       auto fn = pair.first->getName().str();
       if (targetFuncName.find(fn) != targetFuncName.end()) {
-          targetFunc.insert(pair.first);
+        targetFunc.insert(pair.first);
       }
       if (pair.first->isDeclaration()) {
-          declareFunc[fn].insert(pair.first);
+        declareFunc[fn].insert(pair.first);
       } else {
         definedFunc[fn].insert(pair.first);
       }
@@ -143,86 +145,80 @@ class Runner {
     return true;
   }
 
-  void processModule(Module *m) {
-    for (auto &Func : *m) {
-      if (Func.isIntrinsic() || Func.isDeclaration()) continue;
+  void processOnFunction(Function *Func) {
+    std::unordered_map<BasicBlock *, double> bbDistance;
 
-      std::unordered_map<BasicBlock *, double> bbDistance;
+    for (auto &BB : *Func) {
+      if (targetBB.find(&BB) != targetBB.end()) continue;
 
-      for (auto &BB : Func) {
-        if (targetBB.find(&BB) != targetBB.end()) continue;
-
-        double min_avg = -1;
-        for (auto &Inst : BB) {
-          double dis = 0;
-          double cnt = 0;
-          if (auto *callInst = dyn_cast<CallInst>(&Inst)) {
-            auto *callee = callInst->getCalledFunction();
-            if (!callee) continue;
-            for (auto &to : targetFunc) {
-              auto path = xmotion::Dijkstra::Search(
-                  &callGraph, const_cast<const Function *>(callee), to);
-              if (path.empty()) continue;
-              dis += 1.0 / (1.0 + (int)path.size());
-              cnt += 1;
-            }
-            double avg = cnt / dis;
-            if (avg > 0) {
-              if (min_avg < 0 || avg < min_avg) min_avg = avg;
-            }
-          }
-        }
-        if (min_avg > 0) bbDistance[&BB] = min_avg;
-      }
-
-      auto getDistance = [&](BasicBlock *bb) -> double {
-        if (targetBB.find(bb) != targetBB.end()) return 0;
-        auto iter = bbDistance.find(bb);
-        if (iter != bbDistance.end()) { return BB_DIS_M * iter->second; }
-        return -1;
-      };
-
-      for (auto &BB : Func) {
-        uint64_t hs;
-        if (!BasicBlockHash(&BB, hs)) continue;
-        auto dis = getDistance(&BB);
-        if (dis == 0) continue;
-        if (dis != -1) {
-          distance[hs] = dis * 1000;
-        } else {
-          dis = 0;
-          int cnt = 0;
-
-          std::vector<std::pair<BasicBlock *, int>> succs;
-          std::unordered_set<BasicBlock*> visited;
-          for (auto bb : successors(&BB)) {
-            visited.insert(bb);
-            succs.emplace_back(bb, 1);
-          }
-            
-
-          while (!succs.empty()) {
-            auto pair = succs.back();
-            succs.pop_back();
-            for (auto succ : successors(pair.first)) {
-              if (visited.find(succ) != visited.end())
-                continue;
-              visited.insert(succ);
-              succs.emplace_back(succ, pair.second + 1);
-            }
-            auto tmp_dis = getDistance(pair.first);
-            if (tmp_dis == -1) continue;
-            dis += 1.0 / (1.0 + dis + pair.second);
+      double min_avg = -1;
+      for (auto &Inst : BB) {
+        double dis = 0;
+        double cnt = 0;
+        if (auto *callInst = dyn_cast<CallInst>(&Inst)) {
+          auto *callee = callInst->getCalledFunction();
+          if (!callee) continue;
+          for (auto &to : targetFunc) {
+            auto path = xmotion::Dijkstra::Search(
+                &callGraph, const_cast<const Function *>(callee), to);
+            if (path.empty()) continue;
+            dis += 1.0 / (1.0 + (int)path.size());
             cnt += 1;
           }
-          if (dis == 0) continue;
-          distance[hs] = cnt / dis * 1000;
+          double avg = cnt / dis;
+          if (avg > 0) {
+            if (min_avg < 0 || avg < min_avg) min_avg = avg;
+          }
         }
+      }
+      if (min_avg > 0) bbDistance[&BB] = min_avg;
+    }
+
+    auto getDistance = [&](BasicBlock *bb) -> double {
+      if (targetBB.find(bb) != targetBB.end()) return 0;
+      auto iter = bbDistance.find(bb);
+      if (iter != bbDistance.end()) { return BB_DIS_M * iter->second; }
+      return -1;
+    };
+
+    for (auto &BB : *Func) {
+      uint64_t hs;
+      if (!BasicBlockHash(&BB, hs)) continue;
+      auto dis = getDistance(&BB);
+      if (dis == 0) continue;
+      if (dis != -1) {
+        distance[hs] = dis * 1000;
+      } else {
+        dis = 0;
+        int cnt = 0;
+
+        std::vector<std::pair<BasicBlock *, int>> succs;
+        std::unordered_set<BasicBlock *>          visited;
+        for (auto bb : successors(&BB)) {
+          visited.insert(bb);
+          succs.emplace_back(bb, 1);
+        }
+
+        while (!succs.empty()) {
+          auto pair = succs.back();
+          succs.pop_back();
+          for (auto succ : successors(pair.first)) {
+            if (visited.find(succ) != visited.end()) continue;
+            visited.insert(succ);
+            succs.emplace_back(succ, pair.second + 1);
+          }
+          auto tmp_dis = getDistance(pair.first);
+          if (tmp_dis == -1) continue;
+          dis += 1.0 / (1.0 + dis + pair.second);
+          cnt += 1;
+        }
+        if (dis == 0) continue;
+        distance[hs] = cnt / dis * 1000;
       }
     }
   }
 
- public:
+  << "" functions dbgs() << "\rtask done " << task << " functions";
   explicit Runner(int i) : pool(i) {
     ReadErrFunc(FuncFile, targetFuncName);
     ReadErrLoc(LocFile, targetLocHash);
@@ -236,21 +232,25 @@ class Runner {
       if (loadFile(file)) counter++;
     }
     buildGraphFinal();
-    dbgs() << "target Func: " << targetFunc.size() << " target BB: " << targetBB.size() << '\n';
+    dbgs() << "target Func: " << targetFunc.size()
+           << " target BB: " << targetBB.size() << '\n';
   }
 
   void execute() {
-    std::mutex mu;
-    int task = 0;
+    std::mutex                     mu;
+    int                            task = 0;
     std::vector<std::future<void>> res;
     for (auto &m : modules) {
-      auto *ptr = m.get();
-      res.emplace_back(pool.enqueue([this, ptr, &task, &mu] { 
-        this->processModule(ptr);
-        std::unique_lock<std::mutex> lock(mu);
-        task += 1;
-        dbgs() << "\rtask done " << task << "/" << modules.size();
-      }));
+      for (auto &func : m->functions()) {
+        if (func.isIntrinsic() || func.isDeclaration()) continue;
+        auto ptr = &func;
+        res.emplace_back(pool.enqueue([this, ptr, &task, &mu] {
+          this->processOnFunction(ptr);
+          std::unique_lock<std::mutex> lock(mu);
+          task += 1;
+          dbgs() << "\rtask done " << task << " functions";
+        }));
+      }
     }
     pool.wait(res);
   }
