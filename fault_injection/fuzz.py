@@ -89,9 +89,9 @@ if __name__ == '__main__':
         if len(cmds) == 0:
             os.sched_yield()
             continue
-        print(f'\nfetch {len(cmds)} new testcase')
+        print(f'fetch {len(cmds)} new testcase')
         start = time.time()
         for cmd in cmds:
             loop.run_until_complete(pool.run_cmd(sys_args.fuzz, False, *cmd.split()))
         total_time += time.time() - start
-        print(f'\ncost {time.time() - start}s/{int(total_time)}s')
+        print(f'\ncost {int(time.time() - start)}s/{int(total_time)}s')

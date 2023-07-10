@@ -218,7 +218,7 @@ class Runner {
     }
   }
 
-  << "" functions dbgs() << "\rtask done " << task << " functions";
+ public:
   explicit Runner(int i) : pool(i) {
     ReadErrFunc(FuncFile, targetFuncName);
     ReadErrLoc(LocFile, targetLocHash);
