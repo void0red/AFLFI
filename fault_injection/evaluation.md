@@ -31,3 +31,9 @@ FJ_FIFUZZ=1 fuzz.py sync_dir ./new_bin
 ```bash
 FJ_FIFUZZ=1 fuzz.py sync_dir ./new_bin
 ```
+
+7. orignal mode based on loc mode
+```bash
+fuzz.py sync_dir/fuzzer0 ./new_bin
+FJ_FIFUZZ=1 fuzzer.py sync_dir/fuzzer0 ./new_bin
+```

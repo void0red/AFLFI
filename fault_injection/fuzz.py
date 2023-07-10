@@ -32,7 +32,11 @@ def concat_cmd(instance, new_bin):
 
 def get_all_cmd(out, new_bin):
     ret = set()
-    for i in os.listdir(out):
+    files = os.listdir(out)
+    if any([i for i in files if 'cmdline' in i]):
+        return concat_cmd(Path(out), new_bin)
+
+    for i in files:
         ret.update(concat_cmd(Path(out).joinpath(i), new_bin))
     return ret
 
