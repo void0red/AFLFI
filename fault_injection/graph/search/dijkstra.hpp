@@ -71,6 +71,23 @@ class Dijkstra {
     return path;
   }
 
+  template <typename State, typename Transition, typename StateIndexer,
+            typename VertexIdentifier>
+  static double FindMinPath(Graph<State, Transition, StateIndexer> *graph,
+                      VertexIdentifier start, VertexIdentifier goal) {
+    // reset last search information
+    graph->ResetAllVertices();
+
+    auto start_it = graph->FindVertex(start);
+    auto goal_it = graph->FindVertex(goal);
+
+    if (start_it != graph->vertex_end() && goal_it != graph->vertex_end()) {
+      auto path_vtx = PerformSearch(graph, start_it, goal_it);
+      if (!path_vtx.empty()) { return path_vtx.back()->g_cost; }
+    }
+    return -1;
+  }
+
   /// Incrementally search with start state, goal state and an empty graph
   template <typename State, typename Transition, typename StateIndexer>
   static Path<State> IncSearch(

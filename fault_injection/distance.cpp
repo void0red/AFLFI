@@ -41,13 +41,10 @@ struct PointerIndexer {
   }
 };
 
-const int BB_DIS_M = 10;
-
 class Runner {
   std::vector<std::unique_ptr<Module>> modules;
 
   ThreadPool pool;
-  std::mutex mu;
 
   std::unordered_set<std::string> targetFuncName;
   std::unordered_set<uint64_t>    targetLocHash;
@@ -88,7 +85,25 @@ class Runner {
       if (pair.first->isIntrinsic() || to->isIntrinsic() ||
           !pair.first->hasName())
         continue;
-      callGraph.AddEdge(pair.first, pair.second->getFunction(), 1);
+
+      auto counter = 1;
+      for (auto &BB : *to) {
+        for (auto &Inst : BB) {
+          if (auto *callInst = dyn_cast<CallInst>(&Inst)) {
+            auto *callee = callInst->getCalledFunction();
+            if (!callee || callee->isIntrinsic()) continue;
+            uint64_t hs;
+            if (!LocHash(callInst, hs)) continue;
+            if (targetLocHash.find(hs) != targetLocHash.end()) {
+              counter += 1;
+              targetBB.insert(&BB);
+              targetFunc.insert(to);
+            }
+          }
+        }
+      }
+
+      callGraph.AddEdge(pair.first, pair.second->getFunction(), 1.0 / counter);
       auto fn = pair.first->getName().str();
       if (targetFuncName.find(fn) != targetFuncName.end()) {
         targetFunc.insert(pair.first);
@@ -97,23 +112,6 @@ class Runner {
         declareFunc[fn].insert(pair.first);
       } else {
         definedFunc[fn].insert(pair.first);
-      }
-    }
-
-    for (auto &Func : *M) {
-      for (auto &BB : Func) {
-        for (auto &Inst : BB) {
-          if (auto *callInst = dyn_cast<CallInst>(&Inst)) {
-            auto *callee = callInst->getCalledFunction();
-            if (!callee || callee->isIntrinsic()) continue;
-            uint64_t hs;
-            if (!LocHash(callInst, hs)) continue;
-            if (targetLocHash.find(hs) != targetLocHash.end()) {
-              targetBB.insert(&BB);
-              targetFunc.insert(&Func);
-            }
-          }
-        }
       }
     }
   }
@@ -146,12 +144,14 @@ class Runner {
   }
 
   void processOnFunction(Function *Func) {
-    std::unordered_map<BasicBlock *, double> bbDistance;
-
     for (auto &BB : *Func) {
-      if (targetBB.find(&BB) != targetBB.end()) continue;
-
-      double min_avg = -1;
+      uint64_t hs;
+      if (!BasicBlockHash(&BB, hs)) continue;
+      if (targetBB.find(&BB) != targetBB.end()) {
+        distance[hs] = 0;
+        continue;
+      }
+      double avg_min = -1;
       for (auto &Inst : BB) {
         double dis = 0;
         double cnt = 0;
@@ -159,62 +159,19 @@ class Runner {
           auto *callee = callInst->getCalledFunction();
           if (!callee) continue;
           for (auto &to : targetFunc) {
-            auto path = xmotion::Dijkstra::Search(
+            auto length = xmotion::Dijkstra::FindMinPath(
                 &callGraph, const_cast<const Function *>(callee), to);
-            if (path.empty()) continue;
-            dis += 1.0 / (1.0 + (int)path.size());
+            if (length < 0) continue;
+            dis += 1.0 / (1.0 + length);
             cnt += 1;
           }
           double avg = cnt / dis;
           if (avg > 0) {
-            if (min_avg < 0 || avg < min_avg) min_avg = avg;
+            if (avg_min < 0 || avg < avg_min) avg_min = avg;
           }
         }
       }
-      if (min_avg > 0) bbDistance[&BB] = min_avg;
-    }
-
-    auto getDistance = [&](BasicBlock *bb) -> double {
-      if (targetBB.find(bb) != targetBB.end()) return 0;
-      auto iter = bbDistance.find(bb);
-      if (iter != bbDistance.end()) { return BB_DIS_M * iter->second; }
-      return -1;
-    };
-
-    for (auto &BB : *Func) {
-      uint64_t hs;
-      if (!BasicBlockHash(&BB, hs)) continue;
-      auto dis = getDistance(&BB);
-      if (dis == 0) continue;
-      if (dis != -1) {
-        distance[hs] = dis * 1000;
-      } else {
-        dis = 0;
-        int cnt = 0;
-
-        std::vector<std::pair<BasicBlock *, int>> succs;
-        std::unordered_set<BasicBlock *>          visited;
-        for (auto bb : successors(&BB)) {
-          visited.insert(bb);
-          succs.emplace_back(bb, 1);
-        }
-
-        while (!succs.empty()) {
-          auto pair = succs.back();
-          succs.pop_back();
-          for (auto succ : successors(pair.first)) {
-            if (visited.find(succ) != visited.end()) continue;
-            visited.insert(succ);
-            succs.emplace_back(succ, pair.second + 1);
-          }
-          auto tmp_dis = getDistance(pair.first);
-          if (tmp_dis == -1) continue;
-          dis += 1.0 / (1.0 + dis + pair.second);
-          cnt += 1;
-        }
-        if (dis == 0) continue;
-        distance[hs] = cnt / dis * 1000;
-      }
+      if (avg_min > 0) { distance[hs] = avg_min * 100; }
     }
   }
 

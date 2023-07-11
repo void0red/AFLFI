@@ -1171,6 +1171,20 @@ u32 calculate_score(afl_state_t *afl, struct queue_entry *q) {
 
   }
 
+  double power_factor = 1.0;
+  if (q->distance > 0) {
+    double normalized_d = 0;
+    normalized_d = (q->distance - afl->min_distance) /
+                   (afl->max_distance - afl->min_distance);
+
+    if (normalized_d >= 0) {
+      power_factor =
+          pow(2.0, 2.0 * (double)log2(MAX_FACTOR) * (1.0 - normalized_d));
+    }
+  }
+
+  perf_score *= power_factor;
+
   /* Make sure that we don't go over limit. */
 
   if (perf_score > afl->havoc_max_mult * 100) {

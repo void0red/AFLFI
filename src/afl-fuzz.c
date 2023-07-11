@@ -2669,21 +2669,22 @@ int main(int argc, char **argv_orig, char **envp) {
     ++runs_in_current_cycle;
 
     do {
-      if (afl->directed_fuzz) {
-        double min_distance = INT_MAX;
-
-        struct queue_entry *cur;
-        for (u32 i = 0; i < afl->queued_items; ++i) {
-          cur = afl->queue_buf[i];
-          if (cur->disabled || cur->distance == 0) continue;
-          if (cur->distance < min_distance) {
-            min_distance = cur->distance;
-            afl->current_entry = i;
-          }
-        }
-        afl->queue_cur = afl->queue_buf[afl->current_entry];
-
-      } else if (likely(!afl->old_seed_selection)) {
+      //      if (afl->directed_fuzz) {
+      //        double min_distance = INT_MAX;
+      //
+      //        struct queue_entry *cur;
+      //        for (u32 i = 0; i < afl->queued_items; ++i) {
+      //          cur = afl->queue_buf[i];
+      //          if (cur->disabled || cur->distance == 0) continue;
+      //          if (cur->distance < min_distance) {
+      //            min_distance = cur->distance;
+      //            afl->current_entry = i;
+      //          }
+      //        }
+      //        afl->queue_cur = afl->queue_buf[afl->current_entry];
+      //
+      //      } else
+      if (likely(!afl->old_seed_selection)) {
         if (unlikely(prev_queued_items < afl->queued_items ||
                      afl->reinit_table)) {
 
