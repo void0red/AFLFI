@@ -25,7 +25,7 @@ void ReadErrFunc(const std::string               &name,
 
   std::string buf;
   while (std::getline(f, buf)) {
-    if (buf[0] == '#') continue;
+    if (buf.empty() || buf[0] == '#') continue;
     out.insert(buf.substr(0, buf.find(',')));
   }
 }
@@ -36,7 +36,7 @@ void ReadErrLoc(const std::string &name, std::unordered_set<uint64_t> &out) {
 
   std::string buf;
   while (std::getline(f, buf)) {
-    if (buf[0] == '#') continue;
+    if (buf.empty() || buf[0] == '#') continue;
     buf = buf.substr(0, buf.find(','));
     out.insert(std::stoull(buf));
   }
