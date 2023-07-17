@@ -139,9 +139,15 @@ void __fault_injection_trace(uint64_t id) {
 
 bool __fault_injection_control(uint64_t id) {
   if (!__init_done || !cb->on) return false;
+  uint64_t *slot = &cb->trace_addr[cb->trace_size];
+  if ((void *)slot >= (void *)cb + shm_size) {
+    fprintf(stderr, "full track buffer\n");
+    return false;
+  }
   cb->hit += 1;
   uint64_t hs = emu_hash(&stack_, id);
-  cb->trace_addr[cb->trace_size++] = hs;
+  *slot = hs;
+  cb->trace_size += 1;
   bool ret = false;
   for (uint32_t i = 0; i < cb->fail_size; ++i) {
     if (cb->fail_addr[i] == hs) {
@@ -149,6 +155,5 @@ bool __fault_injection_control(uint64_t id) {
       break;
     }
   }
-//  if (__afl_debug && ret) fprintf(stderr, "fj control 0x%lx\n", id);
   return ret;
 }
