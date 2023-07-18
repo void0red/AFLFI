@@ -15,6 +15,7 @@ def get_bc_name(old, link=False):
 
 
 ignore_file_ext = ['.s', '.S', '.bc']
+black_list = ['conftest.c']
 
 
 def handle_bitcode_mode(l: list):
@@ -37,7 +38,8 @@ def handle_bitcode_mode(l: list):
     if l[-1].endswith('.s') or l[-1].endswith('.S'):
         return fixed_args
 
-    multi_objs = [v for i, v in enumerate(l) if i != outfile_idx and (v.endswith('.o') or v.endswith('.bc'))]
+    multi_objs = [v for i, v in enumerate(l) if
+                  i != outfile_idx and (v.endswith('.o') or v.endswith('.bc') or v.endswith('.a'))]
 
     if len(multi_objs) > 0 or '-shared' in l:
         link_mode = True
@@ -54,7 +56,13 @@ def handle_bitcode_mode(l: list):
             except Exception as e:
                 logging.info(e)
         else:
-            fixed_args = [clang, '-emit-llvm', '-g'] + l[1:]
+            tmp_args = [clang, '-emit-llvm', '-g'] + l[1:]
+            logging.debug(' '.join(tmp_args))
+            try:
+                subprocess.run(tmp_args, env=os.environ, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                               timeout=30)
+            except Exception as e:
+                logging.info(e)
     elif link_mode:
         # if outfile_idx > 0:
         #     tmp_args = ['llvm-link', '-o', get_bc_name(l[outfile_idx], True)] + [get_bc_name(i) for i in multi_objs]
@@ -109,7 +117,13 @@ if __name__ == '__main__':
     env = os.environ
     clang = env.get('CLANG') or 'clang'
 
-    if env.get('HOOK_RAW'):
+    ignore = False
+    for i in sys.argv[1:]:
+        if i in black_list:
+            ignore = True
+            break
+
+    if env.get('HOOK_RAW') or ignore:
         new_args = [clang] + sys.argv[1:]
     elif env.get('AFL_USE_ASAN') or env.get('AFL_USE_UBSAN'):
         new_args = handle_afl_mode(sys.argv)
