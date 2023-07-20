@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 import os
-import signal
-import threading
 import subprocess
 import time
 from argparse import ArgumentParser
@@ -84,18 +82,25 @@ if __name__ == '__main__':
 
     pool = RunnerPool(os.cpu_count(), 30)
     fuzzed = set()
-    threading.Timer(60 * 30, collect_coverage, (sys_args.build,)).start()
     total_time = 0
     loop = asyncio.new_event_loop()
+    last_collect = time.time()
     while True:
+        now = time.time()
+        if int(last_collect - now) >= 60 * 30:
+            collect_coverage(sys_args.build)
+            last_collect = now
+
         cmds = get_all_cmd(sys_args.out, sys_args.bin) - fuzzed
         fuzzed.update(cmds)
         if len(cmds) == 0:
             os.sched_yield()
             continue
         print(f'fetch {len(cmds)} new testcase')
+
         start = time.time()
         for cmd in cmds:
             loop.run_until_complete(pool.run_cmd(sys_args.fuzz, False, *cmd.split()))
-        total_time += time.time() - start
-        print(f'\ncost {int(time.time() - start)}s/{int(total_time)}s')
+        done = time.time()
+        total_time += done - start
+        print(f'\ncost {int(done - start)}s/{int(total_time)}s')
