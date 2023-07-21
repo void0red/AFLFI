@@ -617,7 +617,6 @@ void loadDistance(std::unordered_map<uint64_t, uint64_t> &out) {
 
 bool LocHash(const llvm::Instruction *inst, uint64_t &out) {
   if (llvm::DILocation *Loc = inst->getDebugLoc()) {
-    auto     dir = Loc->getDirectory();
     auto     file = Loc->getFilename();
     unsigned line = Loc->getLine();
     if (file.empty()) {
@@ -625,11 +624,9 @@ bool LocHash(const llvm::Instruction *inst, uint64_t &out) {
       if (inlineLoc) {
         line = inlineLoc->getLine();
         file = inlineLoc->getFilename();
-        dir = inlineLoc->getDirectory();
       }
     }
-    out = llvm::hash_combine(llvm::hash_value(dir), llvm::hash_value(file),
-                             llvm::hash_value(line),
+    out = llvm::hash_combine(llvm::hash_value(file), llvm::hash_value(line),
                              llvm::hash_value(inst->getType()->getTypeID()));
     return true;
   }

@@ -252,8 +252,14 @@ class Monitor:
         with open(fn, 'w') as f:
             f.write(self.cmd + '\n')
             f.write(self.raw + '\n')
-            f.write('Inject Error Stack:\n' + str(ep) + '\nSanitizer Stack:\n')
-            f.write('\n'.join([str(i) for i in trace]))
+            f.write('Inject Error Stack:\n')
+            for i in ep.frame:
+                f.write(str(i) + '\n')
+            f.write('Sanitizer Stack:\n')
+            for i in trace:
+                for j in i.frame:
+                    f.write(str(j) + '\n')
+                f.write('\n')
         return True
 
 
