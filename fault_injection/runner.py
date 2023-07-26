@@ -330,7 +330,7 @@ class Runner:
                                                          stderr=subprocess.PIPE,
                                                          env=self.env)
         err = await self.proc.stderr.read()
-        return self.read_ctl_block(), Monitor(' '.join(args), err.decode())
+        return self.read_ctl_block(), Monitor(' '.join(args), err.decode(errors='ignore'))
 
     def clean(self):
         self.proc.kill()
