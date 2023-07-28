@@ -160,11 +160,11 @@ if __name__ == '__main__':
 
         sample_grain = [i / 10 for i in range(11)]
         with open('analyzer.eva', 'w') as f:
-            f.write('check_rate,sim,tp,fp,fn,tn,recallrate,fprate')
+            f.write('check_rate,sim,tp,fp,fn,tn,recallrate,fprate\n')
             for check_rate in sample_grain:
                 for sim in sample_grain:
                     r = evaluate(sample, valid, check_rate, sim)
-                    f.write(f'{check_rate},{sim}')
+                    f.write(f'{check_rate},{sim},{str(r)[1:-1]}\n')
         logging.debug('generate result in analyzer.eva')
         exit(0)
 
