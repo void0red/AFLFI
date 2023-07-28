@@ -661,12 +661,15 @@ class Runner {
         OS << hs << ',';
         auto &loc = eh->callInst->getDebugLoc();
         loc.print(OS);
-        OS << '\n';
+        OS << ",0,nocheck\n";
       }
       for (auto eh : checked[pair.first]) {
         if (!LocHash(eh->callInst, hs)) continue;
         snprintf(buf, sizeof(buf), "%0.3lf", sims[eh]);
-        OS << hs << ',' << buf << '\n';
+        OS << hs << ',';
+        auto &loc = eh->callInst->getDebugLoc();
+        loc.print(OS);
+        OS << ',' << buf << '\n';
       }
     }
   }
