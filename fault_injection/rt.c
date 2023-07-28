@@ -105,6 +105,8 @@ bool __fault_injection_control() {
     return false;
   }
 
+  if (have_fault) do_log(addr);
+
   for (uint32_t i = 0; i < cb->disable_size; ++i) {
     if (addr == cb->disable_addr[i]) return false;
   }
@@ -124,6 +126,5 @@ bool __fault_injection_control() {
       return true;
     }
   }
-  if (have_fault) do_log(addr);
   return false;
 }
