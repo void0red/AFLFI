@@ -91,6 +91,22 @@ def read_loc(file):
             ret.add(hs[0])
     return ret
 
+def normalize(sites: [Site]):
+    group_by_name = {}
+    for i in sites:
+        group_by_name.setdefault(i.name, []).append(i)
+    ret = []
+    for k, v in group_by_name.items():
+        sims = [i.sim for i in v]
+        min_ = min(sims)
+        max_ = max(sims)
+        if max_ == min_:
+            ret.extend(v)
+            continue
+        for i in v:
+            i.sim = (i.sim - min_) / (max_ - min_)
+            ret.append(i)
+    return ret
 
 def evaluate(sample: [Site], valid: set, check_rate: float, sim: float):
     tp, fp, fn, tn = 0, 0, 0, 0
@@ -124,10 +140,14 @@ if __name__ == '__main__':
     parser.add_argument('--funcs', type=str, help='defined func list', default='defined.log')
     parser.add_argument('--debug', action='store_true')
     parser.add_argument('--eva', action='store_true')
+    parser.add_argument('--normal', action='store_true', default=True)
     args = parser.parse_args()
     assert Path(args.input).exists()
 
     sites = read_analyzer_log(args.input)
+    
+    if args.normal:
+        sites = normalize(sites)
 
     defined_funcs = []
     if args.onlylib:
