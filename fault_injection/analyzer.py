@@ -165,6 +165,7 @@ if __name__ == '__main__':
                 for sim in sample_grain:
                     r = evaluate(sample, valid, check_rate, sim)
                     f.write(f'{check_rate},{sim}')
+        logging.debug('generate result in analyzer.eva')
         exit(0)
 
     old_func, old_loc, new_func, new_loc = set(), set(), set(), set()
