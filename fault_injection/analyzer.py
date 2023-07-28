@@ -8,7 +8,7 @@ import random
 
 @dataclass
 class Site:
-    func: str
+    name: str
     loc: str
     hs: str
     checked: int
@@ -105,7 +105,13 @@ def evaluate(sample: [Site], valid: set, check_rate: float, sim: float):
                 fn += 1
             else:
                 tn += 1
-    return tp, fp, fn, tn, tp / (tp + fn), fp / (fp + tn)
+    recall = 0.0
+    if tp + fn != 0:
+        recall = tp / (tp + fn)
+    fprate = 0.0
+    if fp + tn != 0:
+        fprate = fp / (fp + tn)
+    return tp, fp, fn, tn, recall, fprate
 
 
 if __name__ == '__main__':
