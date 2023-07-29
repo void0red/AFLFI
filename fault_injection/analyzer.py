@@ -137,7 +137,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='gen loc.txt and func.txt from analyzer result')
     parser.add_argument('--input', type=str, help='analyzer result file', default='analyzer.log')
     parser.add_argument('--check_rate', type=float, default=0.7)
-    parser.add_argument('--sim', type=float, default=0.9)
+    parser.add_argument('--sim', type=float, default=0.8)
     parser.add_argument('--onlylib', type=bool, default=True)
     parser.add_argument('--funcs', type=str, help='defined func list', default='defined.log')
     parser.add_argument('--debug', action='store_true')
