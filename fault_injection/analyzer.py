@@ -209,4 +209,11 @@ if __name__ == '__main__':
         for i in new_func:
             f.write(i + '\n')
 
-    logging.debug(f'old func {len(old_func)}, old loc {len(old_loc)}, new func {len(new_func)}, new loc {len(new_loc)}')
+    filtered = old_loc - new_loc
+    with open('loc.filtered', 'w') as f:
+        for i in filtered:
+            f.write(i + '\n')
+
+    logging.debug(
+        f'old func {len(old_func)}, new func {len(new_func)}, old loc {len(old_loc)}, new loc {len(new_loc)}, '
+        f'filtered loc {len(filtered)}, filter rate {len(filtered) / len(old_loc)}')
