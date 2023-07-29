@@ -249,17 +249,18 @@ class Monitor:
             return False
         ep = self.Symbolizer_.process(self.raw)
         # do simple filter here
-        with open(fn, 'w') as f:
-            f.write(self.cmd + '\n')
-            f.write(self.raw + '\n')
-            f.write('Inject Error Stack:\n')
-            for i in ep.frame:
-                f.write(str(i) + '\n')
-            f.write('Sanitizer Stack:\n')
-            for i in trace:
-                for j in i.frame:
-                    f.write(str(j) + '\n')
-                f.write('\n')
+        if fn:
+            with open(fn, 'w') as f:
+                f.write(self.cmd + '\n')
+                f.write(self.raw + '\n')
+                f.write('Inject Error Stack:\n')
+                for i in ep.frame:
+                    f.write(str(i) + '\n')
+                f.write('Sanitizer Stack:\n')
+                for i in trace:
+                    for j in i.frame:
+                        f.write(str(j) + '\n')
+                    f.write('\n')
         return True
 
 
@@ -353,12 +354,13 @@ class Runner:
 
 
 class RunnerPool:
-    def __init__(self, n: int, timeout: int):
+    def __init__(self, n: int, timeout: int, nosave: bool = False):
         self.runners = asyncio.Queue(n)
         sid = find_min_id()
         for i in range(sid, sid + n):
             self.runners.put_nowait(Runner(i))
         self.timeout = timeout
+        self.nosave = nosave
         self.pending_fault = queue.Queue()
         self.points = set()
         self.finished = 0
@@ -385,7 +387,11 @@ class RunnerPool:
         try:
             ctl, mon = await asyncio.wait_for(inst.run(seq, *args), self.timeout)
             fails = ','.join([str(i) for i in seq.fails])
-            saved = mon.process(f'{Path(args[0]).name},{int(time.time())},{self.crashes},fails:{fails}.log')
+            if self.nosave:
+                logfile = None
+            else:
+                logfile = f'{Path(args[0]).name},{int(time.time())},{self.crashes},fails:{fails}.log'
+            saved = mon.process(logfile)
             if saved:
                 self.crashes += 1
             if fuzz:
@@ -456,7 +462,7 @@ def get_args():
     parser.add_argument('--probe', action='store_true')
     parser.add_argument('--thread', action='store_true')
     parser.add_argument('--timeout', type=int, default=30)
-    # parser.add_argument('--fast', action='store_true')
+    parser.add_argument('--eva', action='store_true')
     parser.add_argument('--fuzz', action='store_true')
     parser.add_argument('exe', type=str, nargs=argparse.REMAINDER)
     return parser.parse_args()
@@ -476,7 +482,7 @@ if __name__ == '__main__':
     elif parm.failth:
         asyncio.run(Runner().run(parm.failth, *parm.exe))
     elif parm.thread:
-        pool = RunnerPool(os.cpu_count(), parm.timeout)
+        pool = RunnerPool(os.cpu_count(), parm.timeout, parm.eva)
         start = time.time()
         asyncio.run(pool.run_cmd(parm.fuzz, False, *parm.exe))
         logging.info(f'\ncost {time.time() - start}s')

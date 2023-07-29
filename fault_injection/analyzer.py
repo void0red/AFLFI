@@ -18,8 +18,8 @@ class Site:
     is_check: bool
 
     def filter(self, check_rate, sim):
-        if 'alloc' in self.name or 'memalign' in self.name:
-            return True
+        # if 'alloc' in self.name or 'memalign' in self.name:
+        #     return True
         if self.check_rate < check_rate or self.sim > sim:
             return False
         return True
@@ -91,6 +91,7 @@ def read_loc(file):
             ret.add(hs[0])
     return ret
 
+
 def normalize(sites: [Site]):
     group_by_name = {}
     for i in sites:
@@ -107,6 +108,7 @@ def normalize(sites: [Site]):
             i.sim = (i.sim - min_) / (max_ - min_)
             ret.append(i)
     return ret
+
 
 def evaluate(sample: [Site], valid: set, check_rate: float, sim: float):
     tp, fp, fn, tn = 0, 0, 0, 0
@@ -145,7 +147,7 @@ if __name__ == '__main__':
     assert Path(args.input).exists()
 
     sites = read_analyzer_log(args.input)
-    
+
     if args.normal:
         sites = normalize(sites)
 
