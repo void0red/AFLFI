@@ -2,6 +2,7 @@
 // Created by void0red on 23-6-6.
 //
 #include <llvm/Analysis/MemorySSA.h>
+#include <llvm/Analysis/AliasAnalysis.h>
 #include <llvm/IR/DebugInfo.h>
 #include <llvm/IR/DebugLoc.h>
 #include <llvm/IR/InstIterator.h>
@@ -53,6 +54,9 @@ static cl::opt<std::string> OutputDefinedFile("out-def", cl::Optional,
                                               cl::cat(DefaultCat));
 
 static cl::opt<bool> hDebug("debug", cl::cat(DefaultCat), cl::Hidden);
+
+using ValueSet = std::unordered_set<Value *>;
+using ValueMapSet = std::unordered_map<Value *, ValueSet>;
 
 struct ErrorHandler {
   CallInst              *callInst;
@@ -160,13 +164,16 @@ struct Node {
 };
 
 class DataFlowGraph {
-  llvm::Instruction                              *root;
-  llvm::MemorySSA                                &mSSA;
-  llvm::DominatorTree                            &DT;
+  llvm::Instruction   *root;
+  llvm::MemorySSA     &mSSA;
+  llvm::DominatorTree &DT;
+  llvm::AAResults     &aaResults;
+  ValueMapSet         &aliasPtr;
+
   std::vector<llvm::Instruction *>                workList;
   std::unordered_map<llvm::Instruction *, Node *> inst2Node;
   std::unordered_set<Node *>                      nodeSet;
-  std::unordered_set<llvm::Value *>               visited;
+  ValueSet                                        visited;
 
   using Path = std::vector<Node *>;
   using BBVec = std::vector<BasicBlock *>;
@@ -182,7 +189,76 @@ class DataFlowGraph {
     return true;
   }
 
+  ValueSet fetchAliasPtr(llvm::Value *v) {
+    auto iter = aliasPtr.find(v);
+    if (iter != aliasPtr.end()) { return iter->second; }
+
+    // delay collect ptr
+    ValueSet ret;
+    auto    *F = root->getFunction();
+    //    auto    *vSrc = getSrc(v, debug);
+    for (auto &inst : instructions((F))) {
+      if (auto *storeInst = dyn_cast<StoreInst>(&inst)) {
+        auto t = storeInst->getPointerOperand();
+        if (t == v) continue;
+        auto as = aaResults.alias(t, v);
+        if (as == AliasResult::MustAlias || as == AliasResult::PartialAlias ||
+            (as == AliasResult::MayAlias
+             //             && getSrc(t, debug) == vSrc
+             )) {
+          ret.insert(t);
+        }
+      } else if (auto *loadInst = dyn_cast<LoadInst>(&inst)) {
+        auto t = loadInst->getPointerOperand();
+        if (t == v) continue;
+        auto as = aaResults.alias(t, v);
+        if (as == AliasResult::MustAlias || as == AliasResult::PartialAlias ||
+            (as == AliasResult::MayAlias
+             //             && getSrc(t, debug) == vSrc
+             )) {
+          ret.insert(t);
+        }
+      } else if (auto *callInst = dyn_cast<CallInst>(&inst)) {
+        for (auto *arg : callInst->operand_values()) {
+          if (!arg->getType()->isPointerTy() || arg == v) continue;
+          auto as = aaResults.alias(arg, v);
+          if (as == AliasResult::MustAlias || as == AliasResult::PartialAlias ||
+              (as == AliasResult::MayAlias
+               //               && getSrc(arg, debug) == vSrc
+               )) {
+            ret.insert(arg);
+          }
+        }
+      }
+    }
+    aliasPtr[v] = ret;
+    return ret;
+  }
+
   void handleStore(llvm::StoreInst *inst) {
+//    auto *ptr = inst->getPointerOperand();
+//    auto  ap = fetchAliasPtr(ptr);
+//
+//    std::vector<LoadInst *> candidates;
+//
+//    for (auto v : ap) {
+//      if (auto *i = dyn_cast<LoadInst>(v)) {
+//        if (!DT.dominates(inst, i)) continue;
+//        candidates.push_back(i);
+//      }
+//    }
+//
+//    if (hDebug) {
+//      dbgs() << "AliasPtr for: ";
+//      inst->print(dbgs());
+//      dbgs() << '\n';
+//      for (auto v : candidates) {
+//        v->print(dbgs());
+//        dbgs() << '\n';
+//      }
+//      dbgs() << "#####\n";
+//    }
+
     auto *storeMA = mSSA.getMemoryAccess(inst);
     auto  storeNode = getNode(inst);
 
@@ -208,13 +284,18 @@ class DataFlowGraph {
       if (elemVisited(back)) continue;
       if (auto *mu = dyn_cast<MemoryUse>(back)) {
         if (auto *loadInst = dyn_cast<LoadInst>(mu->getMemoryInst())) {
+          if (hDebug) {
+            dbgs() << "LoadSameMem: ";
+            loadInst->print(dbgs());
+            dbgs() << '\n';
+          }
           storeNode->addOut(getNode(loadInst));
           workList.push_back(loadInst);
           find = true;
         }
       } else if (auto *md = dyn_cast<MemoryDef>(back)) {
         if (hDebug) {
-          dbgs() << "MemoryDef :";
+          dbgs() << "MemoryDef: ";
           md->getMemoryInst()->print(dbgs());
           dbgs() << '\n';
         }
@@ -232,6 +313,11 @@ class DataFlowGraph {
            ni = ni->getNextNonDebugInstruction()) {
         if (auto *loadInst = dyn_cast<LoadInst>(ni)) {
           if (loadInst->getPointerOperand()->stripPointerCasts() == storePtr) {
+            if (hDebug) {
+              dbgs() << "LoadSamePtr :";
+              loadInst->print(dbgs());
+              dbgs() << '\n';
+            }
             storeNode->addOut(getNode(loadInst));
             workList.push_back(loadInst);
             find = true;
@@ -397,8 +483,13 @@ class DataFlowGraph {
 
  public:
   DataFlowGraph(llvm::Instruction *inst, llvm::MemorySSA &mSSA,
-                llvm::DominatorTree &dt)
-      : root(inst), mSSA(mSSA), DT(dt), workList({inst}) {
+                llvm::DominatorTree &dt, llvm::AAResults &aRes, ValueMapSet &ap)
+      : root(inst),
+        mSSA(mSSA),
+        DT(dt),
+        aaResults(aRes),
+        aliasPtr(ap),
+        workList({inst}) {
     while (!workList.empty()) {
       auto *i = workList.back();
       workList.pop_back();
@@ -459,6 +550,13 @@ class DataFlowGraph {
     }
     for (auto &p : checkedPath) {
       auto &&eh = check(p);
+      if (hDebug) {
+        dbgs() << "###### check: " << eh->checked << '\n';
+        for (auto i = p.rbegin(); i != p.rend(); ++i) {
+          (*i)->inst->print(dbgs());
+          dbgs() << '\n';
+        }
+      }
       if ((!ret->checked && eh->checked) ||
           (ret->checked && eh->checked && eh->data.size() < size)) {
         size = eh->data.size();
@@ -481,6 +579,8 @@ struct Analyzer : AnalysisInfoMixin<Analyzer> {
 
   Result run(llvm::Function &F, llvm::FunctionAnalysisManager &FAM) {
     Result ret;
+    auto   aliasPtr = std::make_unique<ValueMapSet>();
+
     for (auto &inst : instructions(F)) {
       auto *callInst = dyn_cast<CallInst>(&inst);
       if (!callInst) continue;
@@ -503,7 +603,8 @@ struct Analyzer : AnalysisInfoMixin<Analyzer> {
 
       auto cg = std::make_unique<DataFlowGraph>(
           callInst, FAM.getResult<MemorySSAAnalysis>(F).getMSSA(),
-          FAM.getResult<DominatorTreeAnalysis>(F));
+          FAM.getResult<DominatorTreeAnalysis>(F), FAM.getResult<AAManager>(F),
+          *aliasPtr.get());
       ret.push_back(cg->Eval());
     }
     return ret;

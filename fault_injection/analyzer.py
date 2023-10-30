@@ -55,7 +55,7 @@ class Site:
 
 #     def loc(self):
 #         return '#' + self.__str__() + '\n' + '\n'.join(self.eh.keys()) + '\n'
-# 
+#
 # global_locs = {}
 
 
@@ -71,7 +71,7 @@ def read_analyzer_log(file) -> [Site]:
                 uc = int(o[1])
                 continue
             hs, loc, v, *o = line.split(',')
-            ret.append(Site(n, loc, hs, c, uc, c / (c + uc), float(v), o != []))
+            ret.append(Site(n, loc, hs, c, uc, c / (c + uc), float(v), o == []))
     return ret
 
 
@@ -157,7 +157,7 @@ if __name__ == '__main__':
         defined_funcs = read_defined_funcs(args.funcs)
 
     if args.debug:
-        l = [(i, i.check_rate) for i in sites if i.unchecked != 0]
+        l = [(i, i.check_rate) for i in sites if i.unchecked != 0 and not i.is_check]
         for i in sorted(l, key=lambda x: x[1], reverse=True):
             print(i[0].name, i[0].loc, i[0].check_rate, i[0].sim)
         exit(0)
